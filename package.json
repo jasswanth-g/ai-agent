@@ -1,0 +1,27 @@
+{
+  "name": "@qwipo/aiagent",
+  "version": "1.0.0",
+  "description": "Azure DevOps CI/CD automation agent - CLI tool",
+  "main": "index.js",
+  "bin": {
+    "qwipo": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "setup": "node index.js --setup"
+  },
+  "keywords": [
+    "azure-devops",
+    "cli",
+    "agent",
+    "ci-cd"
+  ],
+  "license": "PRIVATE",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.86.1",
+    "chalk": "^4.1.2",
+    "configstore": "^5.0.1",
+    "inquirer": "^8.2.6",
+    "ora": "^5.4.1"
+  }
+}
