@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Qwipo DevOps Agent — macOS installer
 #
-# One-liner usage (once the repo is pushed to GitHub):
-#   curl -fsSL https://raw.githubusercontent.com/<ORG>/ai-agent/main/install.sh | bash
+# One-liner:
+#   curl -fsSL https://raw.githubusercontent.com/jasswanth-g/ai-agent/main/install.sh | bash
 #
 # Local usage (from the repo root):
 #   ./install.sh
 #
 # Honors these env vars:
-#   QWIPO_REPO_URL     — git URL to clone (default: https://github.com/YOUR-ORG/ai-agent.git)
+#   QWIPO_REPO_URL     — git URL to clone (default: https://github.com/jasswanth-g/ai-agent.git)
 #   QWIPO_INSTALL_DIR  — where to put the source (default: ~/.qwipo-agent)
 set -euo pipefail
 
@@ -38,6 +38,22 @@ if [[ ! -t 0 ]] && [[ -r /dev/tty ]]; then exec </dev/tty; fi
 if [[ "$(uname -s)" != "Darwin" ]]; then
   fail "This installer currently supports macOS only."
 fi
+
+# --- upfront banner so the user knows what's about to happen ---
+echo ""
+echo -e "${c_bold}${c_blue}┌────────────────────────────────────────────────────────────┐${c_reset}"
+echo -e "${c_bold}${c_blue}│${c_reset}  ${c_bold}Qwipo DevOps Agent — installer${c_reset}                           ${c_bold}${c_blue}│${c_reset}"
+echo -e "${c_bold}${c_blue}│${c_reset}                                                            ${c_bold}${c_blue}│${c_reset}"
+echo -e "${c_bold}${c_blue}│${c_reset}  Will install (if missing):                                ${c_bold}${c_blue}│${c_reset}"
+echo -e "${c_bold}${c_blue}│${c_reset}    • Homebrew       • Node.js        • Azure CLI          ${c_bold}${c_blue}│${c_reset}"
+echo -e "${c_bold}${c_blue}│${c_reset}    • Ollama         • qwen2.5:7b model (~5 GB)            ${c_bold}${c_blue}│${c_reset}"
+echo -e "${c_bold}${c_blue}│${c_reset}    • this repo      → ~/.qwipo-agent                      ${c_bold}${c_blue}│${c_reset}"
+echo -e "${c_bold}${c_blue}│${c_reset}                                                            ${c_bold}${c_blue}│${c_reset}"
+echo -e "${c_bold}${c_blue}│${c_reset}  ${c_dim}Expected time: 15–25 min on a fresh Mac,${c_reset}                 ${c_bold}${c_blue}│${c_reset}"
+echo -e "${c_bold}${c_blue}│${c_reset}  ${c_dim}1–2 min if you already have Homebrew + Node.${c_reset}             ${c_bold}${c_blue}│${c_reset}"
+echo -e "${c_bold}${c_blue}│${c_reset}  ${c_dim}Sudo password may be required once (for Homebrew).${c_reset}       ${c_bold}${c_blue}│${c_reset}"
+echo -e "${c_bold}${c_blue}└────────────────────────────────────────────────────────────┘${c_reset}"
+echo ""
 
 # --- Homebrew ---
 step "Checking Homebrew"
