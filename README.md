@@ -10,6 +10,12 @@ Copy-paste this in your terminal:
 curl -fsSL https://raw.githubusercontent.com/jasswanth-g/ai-agent/main/install.sh | bash
 ```
 
+*Prefer to see download progress first?* Use this two-step variant instead — curl shows a progress bar while fetching, then bash runs the saved script with no stdin buffering:
+
+```bash
+curl -fL -o /tmp/qwipo-install.sh https://raw.githubusercontent.com/jasswanth-g/ai-agent/main/install.sh && bash /tmp/qwipo-install.sh
+```
+
 That's it. The installer takes care of everything:
 
 - Homebrew, Node.js, Azure CLI, Ollama (skips anything you already have)

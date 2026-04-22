@@ -10,6 +10,11 @@
 # Honors these env vars:
 #   QWIPO_REPO_URL     — git URL to clone (default: https://github.com/jasswanth-g/ai-agent.git)
 #   QWIPO_INSTALL_DIR  — where to put the source (default: ~/.qwipo-agent)
+
+# Print an instant status line BEFORE anything else so the user sees immediate
+# feedback after pasting the one-liner (avoids the curl|bash "silent pause").
+printf "\n\033[1m\033[34m==>\033[0m \033[1mQwipo installer starting — preparing your machine, please wait…\033[0m\n" >&2
+
 set -euo pipefail
 
 REPO_URL="${QWIPO_REPO_URL:-https://github.com/jasswanth-g/ai-agent.git}"
