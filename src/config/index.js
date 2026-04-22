@@ -1,7 +1,7 @@
 const { getConfig } = require("../setup");
 
 const OLLAMA_URL = "http://localhost:11434/api/chat";
-const MODEL = "qwen2.5:7b";
+const MODEL = getConfig("OLLAMA_MODEL") || "qwen2.5:7b";
 const MAX_TOOL_STEPS = 10;
 
 const AZURE_DEVOPS_ORG = getConfig("AZURE_DEVOPS_ORG");
