@@ -100,9 +100,13 @@ async function runSetup() {
     {
       type: "input",
       name: "org",
-      message: "Azure DevOps Org URL:",
-      default: detectedOrg || "https://dev.azure.com/your-org/",
-      validate: (input) => input.includes("dev.azure.com") || "Must be a valid Azure DevOps URL (e.g., https://dev.azure.com/your-org/)",
+      message: "Azure DevOps Org URL (e.g. https://dev.azure.com/<your-org>/):",
+      default: detectedOrg || undefined,
+      validate: (input) => {
+        if (!input.includes("dev.azure.com")) return "Must be a valid Azure DevOps URL (e.g. https://dev.azure.com/<your-org>/)";
+        if (/\/your-org\/?$/i.test(input) || /<your-org>/i.test(input)) return "Replace '<your-org>' with your actual organization name (e.g. https://dev.azure.com/xavica/)";
+        return true;
+      },
     },
     {
       type: "input",
