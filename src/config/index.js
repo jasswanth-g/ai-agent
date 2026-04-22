@@ -6,7 +6,6 @@ const MAX_TOOL_STEPS = 10;
 
 const AZURE_DEVOPS_ORG = getConfig("AZURE_DEVOPS_ORG");
 const AZURE_DEVOPS_PROJECT = getConfig("AZURE_DEVOPS_PROJECT");
-const AZURE_DEVOPS_PAT = getConfig("AZURE_DEVOPS_PAT");
 
 module.exports = {
   OLLAMA_URL,
@@ -14,5 +13,4 @@ module.exports = {
   MAX_TOOL_STEPS,
   AZURE_DEVOPS_ORG,
   AZURE_DEVOPS_PROJECT,
-  AZURE_DEVOPS_PAT,
 };

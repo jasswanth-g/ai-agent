@@ -21,12 +21,13 @@ async function pollBuild(buildId) {
     color: "yellow",
   }).start();
 
+  const INITIAL_POLL_DELAY = 60000; // builds rarely finish under 60s — skip early polls
   const POLL_INTERVAL = 15000;
-  const MAX_POLLS = 80;
+  const MAX_POLLS = 17; // 60s + 16 × 15s = 300s = 5 min ceiling
   const startTime = Date.now();
 
   for (let i = 0; i < MAX_POLLS; i++) {
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+    await new Promise((r) => setTimeout(r, i === 0 ? INITIAL_POLL_DELAY : POLL_INTERVAL));
 
     try {
       const build = await getBuildStatus(buildId);
@@ -46,7 +47,7 @@ async function pollBuild(buildId) {
     }
   }
 
-  spinner.warn(chalk.yellow(`Build #${buildId} still running after 20 minutes. Check manually.`));
+  spinner.warn(chalk.yellow(`Build #${buildId} still running after 5 minutes. Check manually.`));
   return null;
 }
 
@@ -136,7 +137,7 @@ module.exports = {
     required: ["pipeline_id", "branch"],
   },
   description:
-    'Queue a build pipeline on a branch. Args: {"pipeline_id": "123", "branch": "feature/xyz", "wait_for_completion": "true"}. Set wait_for_completion to "true" when a release will follow — it waits for the build to finish and reports success/failure.',
+    'Queue a build pipeline on a branch. You MUST pass the buildPipelineId returned by az_resolve_service for THIS request — do NOT reuse IDs from examples or prior calls. Args: {"pipeline_id": "<buildPipelineId from az_resolve_service>", "branch": "<branch>", "wait_for_completion": "true"}. Set wait_for_completion to "true" when a release will follow — it waits for the build to finish and reports success/failure.',
   fn: async (args) => {
     try {
       return await triggerBuild(args);

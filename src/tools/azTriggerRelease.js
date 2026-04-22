@@ -60,7 +60,7 @@ module.exports = {
     required: ["definition_id"],
   },
   description:
-    'Trigger a release/deployment via ArgoCD pipeline. Args: {"definition_id": "193", "branch": "dev", "environment": "dev"}. Branch defaults to "dev", only "dev" and "testing" are allowed. Environment defaults to "dev", only "dev" and "test" allowed.',
+    'Trigger a release/deployment via ArgoCD pipeline. You MUST pass the releasePipelineId returned by az_resolve_service for THIS request — do NOT reuse IDs from examples or prior calls. Args: {"definition_id": "<releasePipelineId from az_resolve_service>", "branch": "<branch>", "environment": "<dev|test>"}. Branch defaults to "dev", only "dev" and "testing" are allowed. Environment defaults to "dev", only "dev" and "test" allowed.',
   fn: async (args) => {
     try {
       return await triggerRelease(args);

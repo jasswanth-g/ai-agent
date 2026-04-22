@@ -23,7 +23,9 @@ function levenshtein(a, b) {
 async function resolveService({ service_name }) {
   if (!service_name) return "Error: service_name is required.";
 
-  const nameLower = service_name.toLowerCase().trim();
+  // Normalize: lowercase, trim, collapse runs of spaces/underscores into a single hyphen,
+  // so "hm queue", "HM_Queue", "pre order service" all hit the exact-match path.
+  const nameLower = service_name.toLowerCase().trim().replace(/[\s_]+/g, "-");
 
   // Step 1: Exact match
   if (SERVICE_ALIASES[nameLower]) {

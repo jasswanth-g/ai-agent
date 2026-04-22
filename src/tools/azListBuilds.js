@@ -30,7 +30,7 @@ async function listBuilds({ pipeline_id, top, branch } = {}) {
       `Build ID: ${b.id}`,
       `  Pipeline: ${b.definition?.name || "N/A"}`,
       `  Status: ${b.status} | Result: ${b.result || "in progress"}`,
-      `  Branch: ${b.sourceBranch}`,
+      `  Source Branch: ${b.sourceBranch}`,
       `  Requested By: ${b.requestedBy?.displayName || b.requestedFor?.displayName || "N/A"}`,
       `  Start: ${b.startTime || "N/A"} | Finish: ${b.finishTime || "N/A"}`,
     ].join("\n"))

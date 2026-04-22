@@ -9,6 +9,7 @@ const { buildSystemPrompt } = require("./prompt");
 const { loadTools, getToolDescriptions, runTool } = require("../tools");
 const { SERVICE_ALIASES } = require("../config/serviceAliases");
 const { config, runSetup } = require("../setup");
+const { setDebugMode } = require("../utils/shell");
 
 // Debug mode — toggled with Ctrl+L
 let debugMode = false;
@@ -29,31 +30,70 @@ function debugLog(label, data) {
 async function checkPrerequisites() {
   const spinner = ora("Checking prerequisites...").start();
 
+  // Check if Azure CLI is installed
   const azAvailable = await new Promise((resolve) => {
     execFile("az", ["--version"], (err) => resolve(!err));
   });
 
   if (!azAvailable) {
-    spinner.warn("Azure CLI (az) not found — Azure tools will not work.");
-  } else if (!AZURE_DEVOPS_ORG || !AZURE_DEVOPS_PROJECT) {
-    spinner.warn("Azure DevOps org/project not configured. Run: qwipo --setup");
-  } else {
-    spinner.succeed("Azure CLI connected");
+    spinner.fail("Azure CLI (az) not found. Install it: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli?view=azure-cli-latest");
+    return false;
   }
+
+  // Check if user is logged in
+  const azLoggedIn = await new Promise((resolve) => {
+    execFile("az", ["account", "show"], (err) => resolve(!err));
+  });
+
+  if (!azLoggedIn) {
+    spinner.fail("Not logged in to Azure CLI. Run: az login");
+    return false;
+  }
+
+  if (!AZURE_DEVOPS_ORG || !AZURE_DEVOPS_PROJECT) {
+    spinner.warn("Azure DevOps org/project not configured. Run: qwipo --setup");
+    return false;
+  }
+
+  spinner.succeed("Azure CLI connected");
+  return true;
+}
+
+function prettifyEmail(upn) {
+  if (!upn || typeof upn !== "string" || !upn.includes("@")) return null;
+  const local = upn.split("@")[0];
+  const parts = local.split(/[._]/).filter(Boolean);
+  if (parts.length === 0) return null;
+  return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(" ");
 }
 
 async function fetchAzureUserName() {
   try {
-    const { AZURE_DEVOPS_PAT, AZURE_DEVOPS_ORG } = require("../config");
-    const url = AZURE_DEVOPS_ORG + "_apis/connectionData";
-    const resp = await fetch(url, {
-      headers: {
-        Authorization: "Basic " + Buffer.from(":" + AZURE_DEVOPS_PAT).toString("base64"),
-      },
+    const displayName = await new Promise((resolve, reject) => {
+      execFile(
+        "az",
+        ["ad", "signed-in-user", "show", "--query", "displayName", "-o", "tsv"],
+        (err, stdout) => {
+          if (err) return reject(err);
+          resolve(stdout.trim());
+        }
+      );
     });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    return data.authenticatedUser?.providerDisplayName || null;
+    if (displayName) return displayName;
+  } catch {
+    // Graph read may be denied on some tenants — fall through to UPN-based fallback.
+  }
+
+  try {
+    const output = await new Promise((resolve, reject) => {
+      execFile("az", ["account", "show", "--output", "json"], (err, stdout) => {
+        if (err) return reject(err);
+        resolve(stdout);
+      });
+    });
+    const account = JSON.parse(output);
+    const upn = account.user?.name;
+    return prettifyEmail(upn) || upn || null;
   } catch {
     return null;
   }
@@ -286,8 +326,17 @@ function getUserInput() {
     let menuLines = 0;
     let selectedIndex = -1;
     let currentMatches = [];
+    let isPasting = false;
+    let pasteBuffer = "";
+    let pasteTimer = null;
+    let bracketedPasteActive = false;
+    let lastRenderRows = 1; // visual rows the last redrawPrompt occupied
     const PROMPT_PREFIX = "❯ ";
     const PROMPT_LEN = 2; // visible length of "❯ "
+
+    // Enable bracketed paste so the terminal wraps pasted content in
+    // ESC[200~ ... ESC[201~. Without this, a \r inside a paste hits Enter.
+    process.stdout.write("\x1B[?2004h");
 
     // Draw prompt with bottom border, then move cursor back up to input line
     const cols = process.stdout.columns || 80;
@@ -309,10 +358,18 @@ function getUserInput() {
     }
 
     function redrawPrompt(text, cursorPos) {
-      process.stdout.write("\r\x1B[2K");
+      const cols = process.stdout.columns || 80;
+      // If the previous render wrapped onto multiple rows, move the cursor up
+      // to the first of those rows before clearing — \x1B[2K alone only clears
+      // the current row, which leaves wrapped content visible above.
+      if (lastRenderRows > 1) {
+        process.stdout.write(`\x1B[${lastRenderRows - 1}A`);
+      }
+      process.stdout.write("\r\x1B[J");
       process.stdout.write(chalk.bold.magenta(PROMPT_PREFIX) + text);
       displayInput = text;
-      // Position cursor
+      const totalLen = PROMPT_LEN + text.length;
+      lastRenderRows = Math.max(1, Math.ceil(totalLen / cols) || 1);
       const pos = cursorPos !== undefined ? cursorPos : text.length;
       const moveBack = text.length - pos;
       if (moveBack > 0) {
@@ -320,8 +377,98 @@ function getUserInput() {
       }
     }
 
+    function flushPaste() {
+      if (pasteTimer) {
+        clearTimeout(pasteTimer);
+        pasteTimer = null;
+      }
+      if (!pasteBuffer) {
+        isPasting = false;
+        return;
+      }
+      // Normalize line endings → space (single-line prompt) and drop any other
+      // control bytes so a stray \x7F / \b can't corrupt the rendered prompt.
+      const text = pasteBuffer
+        .replace(/\r\n?/g, "\n")
+        .replace(/\n+$/, "")
+        .replace(/\n/g, " ")
+        .replace(/[\x00-\x1F\x7F]/g, "");
+      pasteBuffer = "";
+      isPasting = false;
+      if (!text) return;
+      input = input.slice(0, cursor) + text + input.slice(cursor);
+      cursor += text.length;
+      selectedIndex = -1;
+      redrawPrompt(input, cursor);
+      updateMenu();
+    }
+
     const onKeypress = (ch, key) => {
       if (!key && !ch) return;
+
+      // Bracketed paste: terminal wraps pasted content in ESC[200~ ... ESC[201~.
+      // Between the markers, swallow everything into pasteBuffer — including \r —
+      // so multi-tick or long pastes can't leak an Enter into the submit path.
+      const seq = (key && key.sequence) || "";
+      if (seq.includes("\x1B[200~")) {
+        bracketedPasteActive = true;
+        return;
+      }
+      if (seq.includes("\x1B[201~") || bracketedPasteActive && seq.endsWith("\x1B[201~")) {
+        bracketedPasteActive = false;
+        flushPaste();
+        return;
+      }
+      if (bracketedPasteActive) {
+        if (ch) pasteBuffer += ch;
+        else if (key && key.name === "return") pasteBuffer += "\n";
+        return;
+      }
+
+      // Route every printable char through pasteBuffer so a multi-char paste
+      // (bytes arriving together) is accumulated and inserted atomically.
+      // A short flush timer drains the buffer during normal typing.
+      const PASTE_FLUSH_MS = 10;
+      // Some terminals (notably macOS Terminal.app) send 0x7F for the delete
+      // key without setting key.name, so key.name-based exclusion isn't enough;
+      // reject anything in the control-byte range by char code as well.
+      const chCode = ch ? ch.charCodeAt(0) : -1;
+      const isControlByte = chCode >= 0 && (chCode < 0x20 || chCode === 0x7F);
+      const isPrintableChar = ch && !isControlByte && (!key || (!key.ctrl && !key.meta && key.name !== "return" && key.name !== "backspace" && key.name !== "delete" && key.name !== "tab" && key.name !== "escape" && key.name !== "up" && key.name !== "down" && key.name !== "left" && key.name !== "right"));
+
+      if (isPrintableChar) {
+        if (pasteTimer) clearTimeout(pasteTimer);
+        pasteBuffer += ch;
+        isPasting = pasteBuffer.length > 1;
+        pasteTimer = setTimeout(flushPaste, PASTE_FLUSH_MS);
+        return;
+      }
+
+      // Stray 0x7F / 0x08 with no key.name set — route to backspace.
+      if (!isPrintableChar && (ch === "\x7F" || ch === "\b") && (!key || !key.name)) {
+        if (pasteBuffer || pasteTimer) flushPaste();
+        if (cursor > 0) {
+          input = input.slice(0, cursor - 1) + input.slice(cursor);
+          cursor--;
+          selectedIndex = -1;
+          redrawPrompt(input, cursor);
+          updateMenu();
+        }
+        return;
+      }
+
+      // Enter while a paste is in flight: capture as newline, don't submit.
+      if (key && key.name === "return" && (pasteBuffer || pasteTimer)) {
+        if (pasteTimer) clearTimeout(pasteTimer);
+        pasteBuffer += "\n";
+        isPasting = true;
+        pasteTimer = setTimeout(flushPaste, PASTE_FLUSH_MS);
+        return;
+      }
+
+      // For any other key (backspace, arrows, Ctrl+*, genuine Enter):
+      // flush pending paste synchronously so display state is current.
+      if (pasteBuffer || pasteTimer) flushPaste();
 
       // Ctrl+C
       if (key && key.ctrl && key.name === "c") {
@@ -334,6 +481,7 @@ function getUserInput() {
       // Ctrl+L — toggle debug mode
       if (key && key.ctrl && key.name === "l") {
         debugMode = !debugMode;
+        setDebugMode(debugMode);
         process.stdout.write("\r\x1B[2K");
         console.log(debugMode
           ? chalk.yellow("\n  Debug mode ON — tool logs will be visible\n")
@@ -488,14 +636,7 @@ function getUserInput() {
         return;
       }
 
-      // Regular character — insert at cursor position
-      if (ch && (!key || (!key.ctrl && !key.meta))) {
-        input = input.slice(0, cursor) + ch + input.slice(cursor);
-        cursor++;
-        selectedIndex = -1;
-        redrawPrompt(input, cursor);
-        updateMenu();
-      }
+      // Printable chars are handled at the top via pasteBuffer; nothing else to do.
     };
 
     function clearMenu() {
@@ -507,6 +648,8 @@ function getUserInput() {
     }
 
     function cleanup() {
+      if (pasteTimer) clearTimeout(pasteTimer);
+      process.stdout.write("\x1B[?2004l"); // disable bracketed paste
       process.stdin.removeListener("keypress", onKeypress);
       process.stdin.setRawMode(false);
       process.stdin.pause();
@@ -580,6 +723,7 @@ async function startAgent() {
     }
     if (userInput.toLowerCase() === "/debug") {
       debugMode = !debugMode;
+      setDebugMode(debugMode);
       console.log(debugMode
         ? chalk.yellow("\n  Debug mode ON — tool logs will be visible\n")
         : chalk.gray("\n  Debug mode OFF\n")
@@ -692,6 +836,19 @@ async function startAgent() {
 
         debugLog(`Tool Result: ${toolName}`, result);
 
+        if (debugMode) {
+          const toolBorder = chalk.dim.cyan("│");
+          console.log("");
+          console.log(chalk.dim.cyan("┌─ TOOL RESULT ────────────────────────────────────"));
+          console.log(`${toolBorder} ${chalk.cyan.bold(toolName)}`);
+          const resultLines = String(result).split("\n");
+          resultLines.forEach((line) => {
+            console.log(`${toolBorder} ${line}`);
+          });
+          console.log(chalk.dim.cyan("└──────────────────────────────────────────────────"));
+          console.log("");
+        }
+
         // Tools with formatted output — display directly, skip LLM reformatting
         const directDisplayTools = ["az_list_work_items", "az_build_and_release", "az_branch_diff"];
         if (directDisplayTools.includes(toolName)) {
@@ -710,6 +867,20 @@ async function startAgent() {
         }
       } catch (err) {
         spinner.fail(chalk.red(`${toolName} failed: ${err.message}`));
+
+        if (debugMode) {
+          const errBorder = chalk.dim.red("│");
+          console.log("");
+          console.log(chalk.dim.red("┌─ TOOL ERROR ─────────────────────────────────────"));
+          console.log(`${errBorder} ${chalk.red.bold(toolName)}`);
+          const errLines = String(err.message).split("\n");
+          errLines.forEach((line) => {
+            console.log(`${errBorder} ${line}`);
+          });
+          console.log(chalk.dim.red("└──────────────────────────────────────────────────"));
+          console.log("");
+        }
+
         conversation.push({ role: "assistant", content: reply });
         conversation.push({
           role: "user",

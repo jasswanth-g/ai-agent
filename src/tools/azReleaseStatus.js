@@ -18,7 +18,8 @@ async function releaseStatus({ release_id }) {
 
   const output = await execAzCli(args);
   const release = JSON.parse(output);
-
+  console.log("=== RELEASE ===");
+  console.log(release);
   const environments = (release.environments || [])
     .map((env) => `  ${env.name}: ${env.status}`)
     .join("\n");

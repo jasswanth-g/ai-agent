@@ -49,6 +49,11 @@ const SERVICE_ALIASES = {
   "logistics-buyer-web": { buildPipelineId: 207, releasePipelineId: 208 },
   "logistics-seller-web": { buildPipelineId: 209, releasePipelineId: 210 },
   "ondc-mq": { buildPipelineId: 213, releasePipelineId: 214 },
+
+  // Team-name aliases — same pipeline IDs as the canonical entries above.
+  "ondc-message-processor": { buildPipelineId: 213, releasePipelineId: 214 }, // same as ondc-mq
+  "bms-search-service": { buildPipelineId: 147, releasePipelineId: 175 },     // same as search-service
+  "bms-order-service": { buildPipelineId: 143, releasePipelineId: 171 },      // same as order-service
 };
 
 module.exports = { SERVICE_ALIASES };
