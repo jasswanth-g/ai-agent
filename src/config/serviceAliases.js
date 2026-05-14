@@ -50,6 +50,15 @@ const SERVICE_ALIASES = {
   "logistics-seller-web": { buildPipelineId: 209, releasePipelineId: 210 },
   "ondc-mq": { buildPipelineId: 213, releasePipelineId: 214 },
 
+  // docker-cd-seller-* / argocd-seller-* and marketplace-connector pipelines
+  "seller-portal": { buildPipelineId: 229, releasePipelineId: 235 },
+  "seller-core-service-api": { buildPipelineId: 222, releasePipelineId: 223 },
+  "seller-core-service-scheduler": { buildPipelineId: 224, releasePipelineId: 230 },
+  "seller-core-service-subscriber": { buildPipelineId: 225, releasePipelineId: 231 },
+  "marketplace-connector-api": { buildPipelineId: 226, releasePipelineId: 232 },
+  "marketplace-connector-scheduler": { buildPipelineId: 227, releasePipelineId: 233 },
+  "marketplace-connector-subscriber": { buildPipelineId: 228, releasePipelineId: 234 },
+
   // Team-name aliases — same pipeline IDs as the canonical entries above.
   "ondc-message-processor": { buildPipelineId: 213, releasePipelineId: 214 }, // same as ondc-mq
   "bms-search-service": { buildPipelineId: 147, releasePipelineId: 175 },     // same as search-service
