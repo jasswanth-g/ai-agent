@@ -266,7 +266,8 @@ function serveStatic(res, file) {
   fs.readFile(full, (err, buf) => {
     if (err) return sendJson(res, 404, { error: "not found" });
     const ext = path.extname(full);
-    const type = ext === ".html" ? "text/html" : ext === ".js" ? "text/javascript" : ext === ".css" ? "text/css" : "application/octet-stream";
+    const type = ext === ".html" ? "text/html" : ext === ".js" ? "text/javascript" : ext === ".css" ? "text/css"
+      : ext === ".mp3" ? "audio/mpeg" : "application/octet-stream";
     res.writeHead(200, { "Content-Type": type });
     res.end(buf);
   });
@@ -280,11 +281,21 @@ function serveStatic(res, file) {
 let currentRun = null;
 let runSeq = 0;
 
-function startRun(jobs) {
+function startRun(jobs, opts = {}) {
+  // Parallel only applies to single-phase actions (build-only / release-only),
+  // where there's nothing to wait on between services. Build+Release always
+  // runs sequentially so each build can finish before the next service starts.
+  const singlePhase = jobs.every((j) => {
+    const a = (j.action || "build-release").toLowerCase();
+    return a === "build" || a === "release";
+  });
+  const parallel = singlePhase && opts.parallel === true;
+
   const run = {
     id: `run-${++runSeq}-${Date.now()}`,
     startedAt: Date.now(),
     jobs,                       // [{ service, branch, environment, action }]
+    parallel,                   // whether services fire all-at-once
     progress: {},               // { service: { build:{...}, release:{...} } }
     status: "running",          // running | done | stopped
     result: null,               // { succeeded, failed }
@@ -311,9 +322,8 @@ function startRun(jobs) {
 
   // Fire-and-forget: the run continues regardless of who is (or isn't) watching.
   (async () => {
-    const allRelease = jobs.every((j) => (j.action || "build-release").toLowerCase() === "release");
     let results;
-    if (allRelease) {
+    if (parallel) {
       results = await Promise.all(jobs.map(runOne));
     } else {
       results = [];
@@ -343,6 +353,11 @@ const server = http.createServer(async (req, res) => {
     // --- UI ---
     if (req.method === "GET" && (pathname === "/" || pathname === "/index.html")) {
       return serveStatic(res, "index.html");
+    }
+
+    // --- static assets (sounds, etc.) under public/ ---
+    if (req.method === "GET" && !pathname.startsWith("/api/") && pathname !== "/") {
+      return serveStatic(res, pathname.replace(/^\/+/, ""));
     }
 
     // --- list services from config ---
@@ -383,7 +398,7 @@ const server = http.createServer(async (req, res) => {
       if (currentRun && currentRun.status === "running") {
         return sendJson(res, 409, { error: "A run is already in progress.", run: currentRun });
       }
-      const run = startRun(jobs);
+      const run = startRun(jobs, { parallel: body.parallel === true });
       return sendJson(res, 200, { runId: run.id, run });
     }
 

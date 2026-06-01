@@ -21,6 +21,19 @@
   }
   header h1 { font-size: 16px; margin: 0; font-weight: 600; }
   header .sub { color: var(--muted); font-size: 12px; }
+  /* Sound toggle — minimal dark bell icon button */
+  .sound-toggle {
+    margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; padding: 0; cursor: pointer;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--muted); transition: color .15s, border-color .15s, background .15s;
+  }
+  .sound-toggle:hover { color: var(--text); border-color: var(--accent); }
+  .sound-toggle .bell { display: block; }
+  .sound-toggle .bell .slash { opacity: 0; transition: opacity .15s; }
+  /* On = active accent bell; Off = muted bell with a slash */
+  .sound-toggle.on { color: var(--accent); border-color: var(--accent); }
+  .sound-toggle:not(.on) .bell .slash { opacity: 1; }
   .layout { display: grid; grid-template-columns: 340px 1fr; gap: 0; height: calc(100vh - 57px); }
   .left { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   .right { display: flex; flex-direction: column; min-height: 0; }
@@ -104,6 +117,13 @@
 <header>
   <h1>Qwipo · Build &amp; Release</h1>
   <span class="sub">Select services → pick build branch → build &amp; release runs one by one</span>
+  <button id="sound-toggle" class="sound-toggle" title="Completion sound" aria-pressed="true">
+    <svg class="bell" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      <line class="slash" x1="3" y1="3" x2="21" y2="21"/>
+    </svg>
+  </button>
 </header>
 
 <div class="layout">
@@ -119,13 +139,28 @@
 
   <!-- RIGHT: selected jobs with branch selection + progress -->
   <div class="right">
-    <div class="panel-head" style="justify-content:flex-start;">
-      <h2>Selected &amp; Branch</h2>
-      <label class="fld" style="margin-left:6px;">Build branch</label>
+    <div class="panel-head" style="justify-content:flex-start;flex-wrap:wrap;">
+      <label class="fld">Action</label>
+      <select id="action" style="min-width:140px;">
+        <option value="build-release" selected>Build &amp; Release</option>
+        <option value="build">Build only</option>
+        <option value="release">Release only</option>
+      </select>
+      <label id="parallel-lbl" class="fld" style="display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;">
+        <input type="checkbox" id="parallel" style="margin:0;cursor:pointer;" />
+        Trigger all in parallel
+      </label>
+      <label class="fld">Build branch</label>
       <select id="build-branch" style="min-width:160px;">
         <option value="dev" selected>dev</option>
         <option value="testing">testing</option>
         <option value="main">main</option>
+      </select>
+      <label class="fld">Release env</label>
+      <select id="release-env" style="min-width:120px;">
+        <option value="dev" selected>dev</option>
+        <option value="testing">testing</option>
+        <option value="production">production</option>
       </select>
       <button id="clear" class="btn ghost" style="margin-left:auto;">Clear all</button>
     </div>
@@ -133,18 +168,6 @@
       <div class="empty">Pick one or more services on the left.<br/>Each gets a build-branch dropdown here.</div>
     </div>
     <div class="footer">
-      <label class="fld">Action</label>
-      <select id="action" style="min-width:140px;">
-        <option value="build-release" selected>Build &amp; Release</option>
-        <option value="build">Build only</option>
-        <option value="release">Release only</option>
-      </select>
-      <label class="fld" style="margin-right:-2px;">Release env</label>
-      <select id="release-env" style="min-width:120px;">
-        <option value="dev" selected>dev</option>
-        <option value="testing">testing</option>
-        <option value="production">production</option>
-      </select>
       <span id="summary" class="summary"></span>
       <button id="deploy" class="btn" disabled>Build &amp; Release</button>
     </div>
@@ -164,6 +187,7 @@ const state = {
   branchesLoading: false,
   environment: "dev",      // overall release env for all services
   action: "build-release", // build-release | build | release
+  parallel: false,         // trigger all-at-once (only for build-only / release-only)
   running: false,
 };
 let pollTimer = null;
@@ -184,6 +208,53 @@ const toast = (msg) => {
   const t = $("#toast"); t.textContent = msg; t.style.display = "block";
   clearTimeout(t._t); t._t = setTimeout(() => t.style.display = "none", 3200);
 };
+
+// ---- completion sound toggle (ring / silent) — persisted across reloads ----
+let soundOn = localStorage.getItem("qwipo-sound") !== "off"; // default ON
+function renderSoundToggle() {
+  const b = $("#sound-toggle");
+  b.classList.toggle("on", soundOn);
+  b.setAttribute("aria-pressed", String(soundOn));
+  b.title = soundOn ? "Completion sound on — click to silence" : "Silent — click to enable completion sound";
+}
+function toggleSound() {
+  soundOn = !soundOn;
+  localStorage.setItem("qwipo-sound", soundOn ? "on" : "off");
+  renderSoundToggle();
+  if (soundOn) playChime(true); // give immediate feedback that sound now works (also unlocks audio)
+}
+
+// ---- failure sound (custom mp3) ----
+const _errorAudio = new Audio("/sounds/faaah.mp3");
+function playError() {
+  if (!soundOn) return;
+  try { _errorAudio.currentTime = 0; _errorAudio.play().catch(() => {}); } catch {}
+}
+
+// ---- completion chime (Web Audio — no asset needed) ----
+let _audioCtx = null;
+function playChime(success) {
+  if (!soundOn) return;
+  try {
+    _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _audioCtx;
+    if (ctx.state === "suspended") ctx.resume();
+    // success: rising major chord (C5→E5→G5); failure: low two-tone buzz.
+    const notes = success ? [523.25, 659.25, 783.99] : [311.13, 233.08];
+    notes.forEach((freq, i) => {
+      const t0 = ctx.currentTime + i * 0.16;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = success ? "sine" : "triangle";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.28, t0 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0); osc.stop(t0 + 0.5);
+    });
+  } catch {}
+}
 
 // ---- load services + reattach to an in-progress run ----
 async function init() {
@@ -433,7 +504,8 @@ function renderProgress(container, job) {
 
 function updateFooter() {
   const n = state.selected.size;
-  const mode = state.action === "release" ? "in parallel" : "sequentially";
+  const par = state.parallel && state.action !== "build-release";
+  const mode = par ? "in parallel" : "sequentially";
   $("#summary").textContent = state.running
     ? `running… · ${mode} · refresh-safe`
     : (n ? `${n} service${n>1?"s":""} · runs ${mode}` : "");
@@ -455,6 +527,13 @@ function setRunningUI() {
   $("#build-branch").disabled = lock || state.action === "release";
   $("#release-env").disabled = lock || state.action === "build";
   $("#clear").disabled = lock;
+  // Parallel checkbox only applies to single-phase actions (build-only / release-only).
+  const parApplies = state.action !== "build-release";
+  const parBox = $("#parallel"), parLbl = $("#parallel-lbl");
+  parBox.disabled = lock || !parApplies;
+  parBox.checked = state.parallel && parApplies;
+  parLbl.style.opacity = parApplies ? "1" : "0.4";
+  parLbl.title = parApplies ? "Fire all selected services at once" : "Build & Release always runs sequentially";
   updateFooter();
 }
 // kept for existing call sites
@@ -479,7 +558,7 @@ async function deploy() {
     const res = await fetch("/api/deploy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobs }),
+      body: JSON.stringify({ jobs, parallel: state.parallel && state.action !== "build-release" }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -522,11 +601,36 @@ async function pollRun() {
       if (run && run.result) {
         const verb = run.status === "stopped" ? "Stopped" : "Done";
         toast(`${verb} — ${run.result.succeeded} succeeded, ${run.result.failed} failed.`);
+        // success chime only when everything passed; failures already played faaah.mp3 as they happened
+        if (run.status !== "stopped" && run.result.failed === 0) playChime(true);
       }
       setRunningUI();
     }
   } catch (e) {
     pollTimer = setTimeout(pollRun, 2500); // transient — retry
+  }
+}
+
+// Play the error sound the moment any build/release phase fails. Per-run scoped;
+// the first snapshot of a run is seeded silently so a refresh won't replay old failures.
+let _seenRunId = null;
+let _seenFailures = new Set();
+function checkFailures(run) {
+  if (!run || !run.id) return;
+  const failed = new Set();
+  for (const [svc, phases] of Object.entries(run.progress || {})) {
+    for (const [phase, p] of Object.entries(phases || {})) {
+      if (p && (p.status === "failed" || p.status === "error")) failed.add(svc + "|" + phase);
+    }
+  }
+  if (run.id !== _seenRunId) {
+    // new run (or reattach) — seed current state without sounding
+    _seenRunId = run.id;
+    _seenFailures = failed;
+    return;
+  }
+  for (const key of failed) {
+    if (!_seenFailures.has(key)) { _seenFailures.add(key); playError(); }
   }
 }
 
@@ -537,6 +641,8 @@ function applyRunSnapshot(run) {
     state.action = act;
     const as = $("#action"); if (as) as.value = act;
   }
+  if (typeof run.parallel === "boolean") state.parallel = run.parallel;
+  checkFailures(run);
   (run.jobs || []).forEach((j) => {
     let job = state.selected.get(j.service);
     if (!job) {
@@ -561,10 +667,13 @@ buildBranchSel.addEventListener("focus", () => {
 buildBranchSel.addEventListener("change", (e) => { state.branch = e.target.value; renderSelected(); });
 $("#release-env").addEventListener("change", (e) => { state.environment = e.target.value; renderSelected(); });
 $("#action").addEventListener("change", (e) => { state.action = e.target.value; updateActionUI(); renderSelected(); });
+$("#parallel").addEventListener("change", (e) => { state.parallel = e.target.checked; updateFooter(); });
 updateActionUI();
 $("#search").addEventListener("input", renderServiceList);
 $("#clear").addEventListener("click", () => { state.selected.clear(); resetGlobalBranch(); renderServiceList(); renderSelected(); });
 $("#deploy").addEventListener("click", () => { state.running ? stopRun() : deploy(); });
+$("#sound-toggle").addEventListener("click", toggleSound);
+renderSoundToggle();
 init();
 </script>
 </body>
