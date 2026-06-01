@@ -37,15 +37,23 @@ async function resolveService({ service_name }) {
     ].join("\n");
   }
 
-  // Step 2: Partial/includes match
-  for (const [alias, ids] of Object.entries(SERVICE_ALIASES)) {
-    if (alias.includes(nameLower) || nameLower.includes(alias)) {
-      return [
-        `Service: ${alias}`,
-        `buildPipelineId: ${ids.buildPipelineId}`,
-        `releasePipelineId: ${ids.releasePipelineId}`,
-      ].join("\n");
-    }
+  // Step 2: Partial/includes match — collect ALL hits, ask if more than one.
+  const partialMatches = Object.entries(SERVICE_ALIASES).filter(
+    ([alias]) => alias.includes(nameLower) || nameLower.includes(alias)
+  );
+
+  if (partialMatches.length === 1) {
+    const [alias, ids] = partialMatches[0];
+    return [
+      `Service: ${alias}`,
+      `buildPipelineId: ${ids.buildPipelineId}`,
+      `releasePipelineId: ${ids.releasePipelineId}`,
+    ].join("\n");
+  }
+
+  if (partialMatches.length > 1) {
+    const names = partialMatches.map(([alias]) => alias).join(", ");
+    return `Multiple services match "${service_name}": ${names}. Which one did you mean?`;
   }
 
   // Step 3: Fuzzy match — find closest service name

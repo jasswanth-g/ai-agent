@@ -69,6 +69,12 @@ async function main() {
     await runSetup();
   }
 
+  // Web UI mode: qwipo --web  — launches the Build & Release web interface
+  if (args.includes("--web")) {
+    require("./src/web/server");
+    return;
+  }
+
   // Headless mode: qwipo --prompt "give build for partner-portal from dev"
   const promptIdx = args.indexOf("--prompt");
   if (promptIdx !== -1) {

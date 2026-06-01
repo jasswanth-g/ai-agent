@@ -8,7 +8,8 @@
   },
   "scripts": {
     "start": "node index.js",
-    "setup": "node index.js --setup"
+    "setup": "node index.js --setup",
+    "web": "node src/web/server.js"
   },
   "keywords": [
     "azure-devops",

@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Qwipo · Build &amp; Release</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel-2: #1d212b; --border: #2a2f3a;
+    --text: #e6e9ef; --muted: #8b93a3; --accent: #5b8cff; --accent-2: #3d6bff;
+    --ok: #3ecf8e; --warn: #f5b14c; --err: #ff6b6b; --chip: #232838;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text);
+  }
+  header {
+    padding: 16px 24px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  .layout { display: grid; grid-template-columns: 340px 1fr; gap: 0; height: calc(100vh - 57px); }
+  .left { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .right { display: flex; flex-direction: column; min-height: 0; }
+  .panel-head {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  .panel-head h2 { font-size: 13px; margin: 0; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .search {
+    margin: 10px 16px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); width: calc(100% - 32px); outline: none;
+  }
+  .search:focus { border-color: var(--accent); }
+  .service-list { overflow-y: auto; padding: 0 8px 12px; flex: 1; min-height: 0; }
+  .service-item {
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  }
+  .service-item:hover { background: var(--panel); }
+  .service-item input { accent-color: var(--accent); width: 16px; height: 16px; }
+  .service-item .name { font-size: 13px; }
+  .service-item .ids { color: var(--muted); font-size: 11px; margin-left: auto; }
+  .btn {
+    background: var(--accent-2); color: #fff; border: none; border-radius: 8px; padding: 8px 14px;
+    font-weight: 600; cursor: pointer; font-size: 13px;
+  }
+  .btn:hover { background: var(--accent); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  .btn.ghost:hover { color: var(--text); border-color: var(--accent); }
+  .selected-area { overflow-y: auto; padding: 16px; flex: 1; min-height: 0; }
+  .empty { color: var(--muted); text-align: center; margin-top: 60px; font-size: 13px; }
+  .job-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; margin-bottom: 12px;
+  }
+  .job-top { display: flex; align-items: center; gap: 12px; }
+  .job-top .svc { font-weight: 600; font-size: 14px; }
+  .job-top .remove { margin-left: auto; cursor: pointer; color: var(--muted); border: none; background: none; font-size: 16px; }
+  .job-top .remove:hover { color: var(--err); }
+  .row { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  label.fld { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  select {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px; outline: none; min-width: 180px;
+  }
+  select:focus { border-color: var(--accent); }
+  .env-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .env-toggle button { background: var(--panel-2); color: var(--muted); border: none; padding: 7px 14px; cursor: pointer; font-size: 12px; }
+  .env-toggle button.active { background: var(--accent-2); color: #fff; }
+  .footer {
+    border-top: 1px solid var(--border); padding: 14px 16px; display: flex; align-items: center; gap: 12px;
+  }
+  .footer .summary { color: var(--muted); font-size: 12px; margin-right: auto; }
+  /* progress */
+  .progress { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px; display: none; }
+  .progress.show { display: block; }
+  .step { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 13px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--border); flex: none; }
+  .dot.queued { background: var(--warn); }
+  .dot.running { background: var(--accent); animation: pulse 1s infinite; }
+  .dot.succeeded { background: var(--ok); }
+  .dot.failed, .dot.error { background: var(--err); }
+  .dot.skipped { background: var(--muted); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .step .label { text-transform: capitalize; }
+  .step .meta { color: var(--muted); font-size: 12px; }
+  .step a { color: var(--accent); text-decoration: none; }
+  .step a:hover { text-decoration: underline; }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 20px; margin-left: auto; }
+  .badge.ok { background: rgba(62,207,142,.15); color: var(--ok); }
+  .badge.err { background: rgba(255,107,107,.15); color: var(--err); }
+  .warn-note { color: var(--warn); font-size: 11px; margin-top: 4px; }
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--panel-2); border: 1px solid var(--border); padding: 10px 16px; border-radius: 8px;
+    font-size: 13px; display: none;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Qwipo · Build &amp; Release</h1>
+  <span class="sub">Select services → pick build branch → build &amp; release runs one by one</span>
+</header>
+
+<div class="layout">
+  <!-- LEFT: services multi-select -->
+  <div class="left">
+    <div class="panel-head">
+      <h2>Services</h2>
+      <span id="svc-count" class="sub" style="color:var(--muted);font-size:12px;"></span>
+    </div>
+    <input id="search" class="search" placeholder="Search services…" />
+    <div id="service-list" class="service-list"></div>
+  </div>
+
+  <!-- RIGHT: selected jobs with branch selection + progress -->
+  <div class="right">
+    <div class="panel-head" style="justify-content:flex-start;">
+      <h2>Selected &amp; Branch</h2>
+      <label class="fld" style="margin-left:6px;">Build branch</label>
+      <select id="build-branch" style="min-width:160px;">
+        <option value="dev" selected>dev</option>
+        <option value="testing">testing</option>
+        <option value="main">main</option>
+      </select>
+      <button id="clear" class="btn ghost" style="margin-left:auto;">Clear all</button>
+    </div>
+    <div id="selected" class="selected-area">
+      <div class="empty">Pick one or more services on the left.<br/>Each gets a build-branch dropdown here.</div>
+    </div>
+    <div class="footer">
+      <label class="fld">Action</label>
+      <select id="action" style="min-width:140px;">
+        <option value="build-release" selected>Build &amp; Release</option>
+        <option value="build">Build only</option>
+        <option value="release">Release only</option>
+      </select>
+      <label class="fld" style="margin-right:-2px;">Release env</label>
+      <select id="release-env" style="min-width:120px;">
+        <option value="dev" selected>dev</option>
+        <option value="testing">testing</option>
+        <option value="production">production</option>
+      </select>
+      <span id="summary" class="summary"></span>
+      <button id="deploy" class="btn" disabled>Build &amp; Release</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const state = {
+  services: [],            // [{name, buildPipelineId, releasePipelineId}]
+  defaultBranches: ["dev","testing","main"],
+  selected: new Map(),     // name -> { progress:{} }
+  branch: "dev",           // overall build branch for all services
+  branches: null,          // union of branches across selected services (lazy)
+  branchesLoaded: false,
+  branchesLoading: false,
+  environment: "dev",      // overall release env for all services
+  action: "build-release", // build-release | build | release
+  running: false,
+};
+let pollTimer = null;
+
+const $ = (sel) => document.querySelector(sel);
+const el = (tag, props={}, ...kids) => {
+  const n = document.createElement(tag);
+  Object.entries(props).forEach(([k,v]) => {
+    if (k === "class") n.className = v;
+    else if (k === "html") n.innerHTML = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v);
+  });
+  kids.forEach(k => n.append(k));
+  return n;
+};
+const toast = (msg) => {
+  const t = $("#toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._t); t._t = setTimeout(() => t.style.display = "none", 3200);
+};
+
+// ---- load services + reattach to an in-progress run ----
+async function init() {
+  const res = await fetch("/api/services");
+  const data = await res.json();
+  state.services = data.services;
+  state.defaultBranches = data.defaultBranches || state.defaultBranches;
+  renderServiceList();
+
+  // If a run is still going (e.g. the page was refreshed), reattach and resume.
+  try {
+    const sres = await fetch("/api/status");
+    const { run } = await sres.json();
+    if (run && run.status === "running") {
+      state.running = true;
+      applyRunSnapshot(run);
+      startPolling();
+    }
+  } catch {}
+  setRunningUI();
+}
+
+function renderServiceList() {
+  const q = $("#search").value.trim().toLowerCase();
+  const list = $("#service-list");
+  list.innerHTML = "";
+  const filtered = state.services.filter(s => s.name.toLowerCase().includes(q));
+  $("#svc-count").textContent = `${state.selected.size} selected · ${filtered.length} shown`;
+  filtered.forEach(s => {
+    const checked = state.selected.has(s.name);
+    list.append(el("label", { class: "service-item" },
+      el("input", { type: "checkbox", ...(checked ? {checked:"checked"} : {}),
+        onchange: (e) => toggleService(s.name, e.target.checked) }),
+      el("span", { class: "name" }, s.name),
+      el("span", { class: "ids" }, `#${s.buildPipelineId}/${s.releasePipelineId}`),
+    ));
+  });
+}
+
+function toggleService(name, on) {
+  if (on) {
+    // overrides default to null = inherit the global build branch / release env.
+    state.selected.set(name, {
+      progress: {},
+      branchOverride: null, envOverride: null,
+      branches: null, branchesLoaded: false, branchesLoading: false,
+    });
+  } else {
+    state.selected.delete(name);
+  }
+  // Selection changed — branch union is now stale; refetch on next open.
+  resetGlobalBranch();
+  renderServiceList();
+  renderSelected();
+}
+
+// ---- overall build branch (lazy: fetched the first time the dropdown opens) ----
+// dev stays the default until the user opens the dropdown.
+function resetGlobalBranch() {
+  state.branchesLoaded = false;
+  state.branches = null;
+  const sel = $("#build-branch");
+  if (sel) {
+    // show dev/testing/main as defaults until the full list is fetched
+    const cur = state.branch || "dev";
+    const list = state.defaultBranches.slice();
+    if (!list.includes(cur)) list.unshift(cur);
+    sel.innerHTML = "";
+    list.forEach((b) => {
+      const o = document.createElement("option");
+      o.value = b; o.textContent = b; if (b === cur) o.selected = true;
+      sel.append(o);
+    });
+  }
+}
+
+async function loadGlobalBranches(selectEl) {
+  if (state.branchesLoading || state.selected.size === 0) return;
+  state.branchesLoading = true;
+  if (selectEl && selectEl.isConnected) {
+    const hint = document.createElement("option");
+    hint.disabled = true; hint.textContent = "Loading branches…";
+    selectEl.append(hint); // transient hint without closing an open dropdown
+  }
+  try {
+    // Union of branches across every selected service (different repos may differ).
+    const names = [...state.selected.keys()];
+    const lists = await Promise.all(names.map(async (n) => {
+      try {
+        const r = await fetch(`/api/branches?service=${encodeURIComponent(n)}`);
+        const d = await r.json();
+        return d.branches || [];
+      } catch { return []; }
+    }));
+    const set = new Set();
+    lists.forEach((l) => l.forEach((b) => set.add(b)));
+    state.defaultBranches.forEach((b) => set.add(b)); // always offer dev/testing/main
+    const all = [...set];
+    const pinned = state.defaultBranches.filter((b) => all.includes(b));
+    const rest = all.filter((b) => !state.defaultBranches.includes(b)).sort();
+    state.branches = [...pinned, ...rest];
+    state.branchesLoaded = true;
+  } catch (e) {
+    state.branches = state.defaultBranches.slice();
+    state.branchesLoaded = true;
+    toast(`Could not load branches (${e.message}).`);
+  } finally {
+    state.branchesLoading = false;
+    if (selectEl && selectEl.isConnected) populateGlobalBranch(selectEl);
+  }
+}
+
+function populateGlobalBranch(selectEl) {
+  const cur = state.branch || "dev";
+  const list = (state.branches && state.branches.length) ? state.branches.slice() : ["dev"];
+  if (!list.includes(cur)) list.unshift(cur); // keep current selection valid
+  selectEl.innerHTML = "";
+  list.forEach((b) => {
+    const o = document.createElement("option");
+    o.value = b; o.textContent = b; if (b === cur) o.selected = true;
+    selectEl.append(o);
+  });
+  state.branch = cur;
+}
+
+// ---- per-service override row (build branch + release env) ----
+const ENV_OPTIONS = ["dev", "testing", "production"];
+
+function buildOverrideRow(name, job) {
+  // Build-branch override — "(global)" first, then this service's branches (lazy).
+  const branchSel = el("select", {
+    onchange: (e) => { job.branchOverride = e.target.value || null; }
+  });
+  branchSel.addEventListener("focus", () => {
+    if (!job.branchesLoaded && !job.branchesLoading) loadServiceBranches(name, branchSel);
+  });
+  fillBranchOverride(branchSel, job);
+
+  // Release-env override — "(global)" + the three environments.
+  const envSel = el("select", {
+    onchange: (e) => { job.envOverride = e.target.value || null; }
+  });
+  envSel.append(optionEl("", `(global: ${state.environment})`, !job.envOverride));
+  ENV_OPTIONS.forEach((env) => envSel.append(optionEl(env, env, job.envOverride === env)));
+
+  // Mirror the global action's relevance + lock everything while a run is live.
+  branchSel.disabled = state.running || state.action === "release";
+  envSel.disabled = state.running || state.action === "build";
+
+  return el("div", { class: "row" },
+    el("div", {}, el("label", { class: "fld" }, "Build branch"), el("div", {}, branchSel)),
+    el("div", {}, el("label", { class: "fld" }, "Release env"), el("div", {}, envSel)),
+    el("button", { class: "btn ghost", title: "Reload branches",
+      onclick: () => { job.branchesLoaded = false; loadServiceBranches(name, branchSel); } }, "↻"),
+  );
+}
+
+function optionEl(value, label, selected) {
+  const o = document.createElement("option");
+  o.value = value; o.textContent = label; if (selected) o.selected = true;
+  return o;
+}
+
+function fillBranchOverride(selectEl, job) {
+  const cur = job.branchOverride || "";
+  selectEl.innerHTML = "";
+  selectEl.append(optionEl("", `(global: ${state.branch})`, !cur));
+  const list = (job.branches && job.branches.length) ? job.branches : state.defaultBranches;
+  list.forEach((b) => selectEl.append(optionEl(b, b, cur === b)));
+  if (cur && !list.includes(cur)) selectEl.append(optionEl(cur, cur, true));
+}
+
+async function loadServiceBranches(name, selectEl) {
+  const job = state.selected.get(name);
+  if (!job || job.branchesLoading) return;
+  job.branchesLoading = true;
+  if (selectEl && selectEl.isConnected) {
+    const hint = document.createElement("option");
+    hint.disabled = true; hint.textContent = "Loading branches…";
+    selectEl.append(hint);
+  }
+  try {
+    const res = await fetch(`/api/branches?service=${encodeURIComponent(name)}`);
+    const data = await res.json();
+    job.branches = (data.branches && data.branches.length) ? data.branches : state.defaultBranches;
+    job.branchesLoaded = true;
+    if (data.warning) toast(`${name}: ${data.warning} — showing defaults.`);
+  } catch (e) {
+    job.branches = state.defaultBranches; job.branchesLoaded = true;
+    toast(`${name}: could not load branches (${e.message}).`);
+  } finally {
+    job.branchesLoading = false;
+    if (selectEl && selectEl.isConnected) fillBranchOverride(selectEl, job);
+  }
+}
+
+function renderSelected() {
+  const area = $("#selected");
+  area.innerHTML = "";
+  if (state.selected.size === 0) {
+    area.append(el("div", { class: "empty", html: "Pick one or more services on the left.<br/>Each gets a build-branch dropdown here." }));
+    setRunningUI();
+    return;
+  }
+  for (const [name, job] of state.selected) {
+    const card = el("div", { class: "job-card" });
+
+    // header row
+    card.append(el("div", { class: "job-top" },
+      el("span", { class: "svc" }, name),
+      el("button", { class: "remove", title: "Remove", onclick: () => toggleService(name, false) }, "✕"),
+    ));
+
+    // per-service override row — leave on "(global)" to inherit the top dropdowns
+    card.append(buildOverrideRow(name, job));
+
+    // progress
+    const prog = el("div", { class: "progress" + (Object.keys(job.progress).length ? " show" : "") });
+    renderProgress(prog, job);
+    card.append(prog);
+
+    area.append(card);
+  }
+  setRunningUI();
+}
+
+function renderProgress(container, job) {
+  container.innerHTML = "";
+  ["build","release"].forEach(phase => {
+    const p = job.progress[phase];
+    if (!p) return;
+    const meta = [];
+    if (p.buildId) meta.push(`build #${p.buildId}`);
+    if (p.releaseId) meta.push(`release #${p.releaseId}`);
+    if (p.elapsed != null) meta.push(`${p.elapsed}s`);
+    if (p.result) meta.push(p.result);
+    const step = el("div", { class: "step" },
+      el("span", { class: "dot " + p.status }),
+      el("span", { class: "label" }, phase + ":"),
+      el("span", { class: "meta" }, p.message || p.status),
+    );
+    if (meta.length) step.append(el("span", { class: "meta" }, "· " + meta.join(" · ")));
+    if (p.url) step.append(el("a", { href: p.url, target: "_blank" }, "open ↗"));
+    container.append(step);
+  });
+}
+
+function updateFooter() {
+  const n = state.selected.size;
+  const mode = state.action === "release" ? "in parallel" : "sequentially";
+  $("#summary").textContent = state.running
+    ? `running… · ${mode} · refresh-safe`
+    : (n ? `${n} service${n>1?"s":""} · runs ${mode}` : "");
+}
+
+const ACTION_LABELS = { "build-release": "Build & Release", build: "Build", release: "Release" };
+function setRunningUI() {
+  const btn = $("#deploy");
+  if (state.running) {
+    btn.textContent = "Stop"; btn.disabled = false; btn.classList.add("ghost");
+  } else {
+    btn.classList.remove("ghost");
+    btn.textContent = ACTION_LABELS[state.action] || "Run";
+    btn.disabled = state.selected.size === 0;
+  }
+  // lock the top controls while a run is in progress
+  const lock = state.running;
+  $("#action").disabled = lock;
+  $("#build-branch").disabled = lock || state.action === "release";
+  $("#release-env").disabled = lock || state.action === "build";
+  $("#clear").disabled = lock;
+  updateFooter();
+}
+// kept for existing call sites
+const updateActionUI = setRunningUI;
+
+// ---- deploy: start a background run, then poll its status (refresh-safe) ----
+async function deploy() {
+  if (state.running || state.selected.size === 0) return;
+
+  // reset progress locally for immediate feedback
+  for (const job of state.selected.values()) job.progress = {};
+  renderSelected();
+
+  const jobs = [...state.selected.entries()].map(([service, j]) => ({
+    service,
+    branch: j.branchOverride || state.branch,
+    environment: j.envOverride || state.environment,
+    action: state.action,
+  }));
+
+  try {
+    const res = await fetch("/api/deploy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobs }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast(data.error || "Could not start run.");
+      if (data.run) { state.running = data.run.status === "running"; applyRunSnapshot(data.run); if (state.running) startPolling(); }
+      return;
+    }
+    state.running = true;
+    setRunningUI();
+    startPolling();
+  } catch (e) {
+    toast("Could not start run: " + e.message);
+  }
+}
+
+async function stopRun() {
+  try {
+    await fetch("/api/stop", { method: "POST" });
+    toast("Stopping — no further services will be triggered.");
+  } catch (e) {
+    toast("Stop failed: " + e.message);
+  }
+  // keep polling; the run's status will flip to "stopped" shortly
+}
+
+function startPolling() {
+  clearTimeout(pollTimer);
+  pollRun();
+}
+
+async function pollRun() {
+  try {
+    const res = await fetch("/api/status");
+    const { run } = await res.json();
+    if (run) applyRunSnapshot(run);
+    if (run && run.status === "running") {
+      pollTimer = setTimeout(pollRun, 1500);
+    } else {
+      state.running = false;
+      if (run && run.result) {
+        const verb = run.status === "stopped" ? "Stopped" : "Done";
+        toast(`${verb} — ${run.result.succeeded} succeeded, ${run.result.failed} failed.`);
+      }
+      setRunningUI();
+    }
+  } catch (e) {
+    pollTimer = setTimeout(pollRun, 2500); // transient — retry
+  }
+}
+
+// Rebuild selection + progress from a server run snapshot (also used to reattach on refresh).
+function applyRunSnapshot(run) {
+  if (run.jobs && run.jobs.length) {
+    const act = run.jobs[0].action || "build-release";
+    state.action = act;
+    const as = $("#action"); if (as) as.value = act;
+  }
+  (run.jobs || []).forEach((j) => {
+    let job = state.selected.get(j.service);
+    if (!job) {
+      // service that was in the run but not in this (fresh) page — add it
+      job = {
+        progress: {}, branchOverride: j.branch || null, envOverride: j.environment || null,
+        branches: null, branchesLoaded: false, branchesLoading: false,
+      };
+      state.selected.set(j.service, job);
+    }
+    job.progress = (run.progress && run.progress[j.service]) || job.progress || {};
+  });
+  renderServiceList();
+  renderSelected();
+}
+
+// ---- wire up ----
+const buildBranchSel = $("#build-branch");
+buildBranchSel.addEventListener("focus", () => {
+  if (!state.branchesLoaded && !state.branchesLoading) loadGlobalBranches(buildBranchSel);
+});
+buildBranchSel.addEventListener("change", (e) => { state.branch = e.target.value; renderSelected(); });
+$("#release-env").addEventListener("change", (e) => { state.environment = e.target.value; renderSelected(); });
+$("#action").addEventListener("change", (e) => { state.action = e.target.value; updateActionUI(); renderSelected(); });
+updateActionUI();
+$("#search").addEventListener("input", renderServiceList);
+$("#clear").addEventListener("click", () => { state.selected.clear(); resetGlobalBranch(); renderServiceList(); renderSelected(); });
+$("#deploy").addEventListener("click", () => { state.running ? stopRun() : deploy(); });
+init();
+</script>
+</body>
+</html>

@@ -6,6 +6,7 @@ const { MAX_TOOL_STEPS, AZURE_DEVOPS_ORG, AZURE_DEVOPS_PROJECT } = require("../c
 const { chat } = require("./ollama");
 const { extractToolCall } = require("./parser");
 const { buildSystemPrompt } = require("./prompt");
+const { parseWriteIntent } = require("./intent");
 const { loadTools, getToolDescriptions, runTool } = require("../tools");
 const { SERVICE_ALIASES } = require("../config/serviceAliases");
 const { config, runSetup } = require("../setup");
@@ -292,6 +293,83 @@ function showConfirmSelector() {
 
     process.stdin.on("keypress", onKey);
   });
+}
+
+async function handleWriteIntent(intent, tools, conversation) {
+  const { action, services, branch, environment } = intent;
+
+  if (!branch) {
+    const msg = "Please tell me which branch to build from (e.g. \"from branch dev\").";
+    console.log("\n" + msg + "\n");
+    conversation.push({ role: "assistant", content: msg });
+    return;
+  }
+
+  // Resolve every service name. Any multi-match / not-found ends the turn.
+  const resolved = [];
+  for (const name of services) {
+    const result = await runTool(tools, "az_resolve_service", { service_name: name });
+
+    if (result.startsWith("Multiple services match") || result.startsWith("No service found")) {
+      console.log("\n" + result + "\n");
+      conversation.push({ role: "assistant", content: result });
+      return;
+    }
+
+    const m = result.match(/Service:\s*(\S+)[\s\S]*?buildPipelineId:\s*(\d+)[\s\S]*?releasePipelineId:\s*(\d+)/);
+    if (!m) {
+      console.log("\n" + result + "\n");
+      conversation.push({ role: "assistant", content: result });
+      return;
+    }
+    resolved.push({ name: m[1], buildPipelineId: m[2], releasePipelineId: m[3] });
+  }
+
+  const names = resolved.map((r) => r.name).join(", ");
+  const env = (environment || "dev").toLowerCase();
+  const confirmMsg =
+    action === "build"
+      ? `I will trigger a build for ${names} from branch ${branch}.`
+      : `I will trigger builds and releases for ${names} from branch ${branch} to ${env} environment.`;
+
+  console.log("");
+  for (const ch of confirmMsg) {
+    process.stdout.write(ch);
+    await new Promise((r) => setTimeout(r, 8));
+  }
+  console.log("\n");
+
+  const answer = await showConfirmSelector();
+  conversation.push({ role: "assistant", content: confirmMsg });
+  conversation.push({ role: "user", content: answer });
+
+  if (!answer.toLowerCase().startsWith("yes")) {
+    console.log(chalk.yellow("\n  Cancelled.\n"));
+    conversation.push({ role: "assistant", content: "Cancelled." });
+    return;
+  }
+
+  const wait = answer === "yes, wait";
+
+  if (action === "build") {
+    for (const r of resolved) {
+      const args = { pipeline_id: String(r.buildPipelineId), branch };
+      if (wait) args.wait_for_completion = "true";
+      const result = await runTool(tools, "az_trigger_build", args);
+      console.log("\n" + result + "\n");
+      conversation.push({ role: "assistant", content: result });
+    }
+    return;
+  }
+
+  // build_and_release — one call handles the whole list.
+  const result = await runTool(tools, "az_build_and_release", {
+    service_names: resolved.map((r) => r.name),
+    branch,
+    environment: env,
+  });
+  console.log("\n" + result + "\n");
+  conversation.push({ role: "assistant", content: result });
 }
 
 // Initialize keypress events once
@@ -750,10 +828,59 @@ async function startAgent() {
     console.log(chalk.bold.magenta("❯ ") + chalk.bgGray.white.bold(` ${userInput} `));
 
     userHistory.push(userInput);
-    conversation.push({ role: "user", content: userInput });
+
+    // If the previous assistant message was a "Multiple services match" clarification
+    // and the user replied with one of the candidate names, rewrite their input back
+    // into the original request so the model doesn't lose context. The Ollama models
+    // we run can't be relied on to remember the prior intent on their own.
+    let effectiveInput = userInput;
+    const lastAssistant = [...conversation].reverse().find((m) => m.role === "assistant");
+    if (lastAssistant && /^Multiple services match/.test(lastAssistant.content)) {
+      const clar = lastAssistant.content.match(/Multiple services match "([^"]+)":\s*([^.\n]+)/);
+      if (clar) {
+        const originalTerm = clar[1];
+        const candidates = clar[2].split(",").map((s) => s.trim());
+        const chosen = userInput.trim();
+        if (candidates.includes(chosen)) {
+          const assistantIdx = conversation.lastIndexOf(lastAssistant);
+          let priorUser = null;
+          for (let i = assistantIdx - 1; i >= 0; i--) {
+            if (conversation[i].role === "user") {
+              priorUser = conversation[i].content;
+              break;
+            }
+          }
+          if (priorUser) {
+            const rewritten = priorUser.replace(
+              new RegExp(`\\b${originalTerm.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b`, "gi"),
+              chosen
+            );
+            if (rewritten !== priorUser) effectiveInput = rewritten;
+          }
+        }
+      }
+    }
+
+    conversation.push({ role: "user", content: effectiveInput });
+
+    // Deterministic write-flow: parse build/release/deploy commands and handle them
+    // ourselves. The LLM gets to see the result in the conversation history but
+    // doesn't drive the WRITE flow (it gets the branch/env wrong too often).
+    const writeIntent = parseWriteIntent(effectiveInput);
+    if (writeIntent) {
+      try {
+        await handleWriteIntent(writeIntent, tools, conversation);
+      } catch (err) {
+        const msg = `Error: ${err.message}`;
+        console.log(chalk.red("\n" + msg + "\n"));
+        conversation.push({ role: "assistant", content: msg });
+      }
+      continue;
+    }
 
     let responded = false;
     const recentCalls = [];
+    let lastResolverUnresolved = false; // true if last az_resolve_service returned multi/none
     for (let step = 0; step < MAX_TOOL_STEPS; step++) {
       const spinner = ora({
         text: "Thinking...",
@@ -778,9 +905,86 @@ async function startAgent() {
         console.log("");
 
         // Detect confirmation prompts and show interactive selector
-        const isConfirmation = /shall i proceed|confirm|yes\/no|yes or no|\(yes\/no\)/i.test(reply);
+        const isConfirmation = /\(yes\/no\)|yes\/no\?|yes or no\?|shall i proceed/i.test(reply);
 
         if (isConfirmation) {
+          // Runtime guard: a WRITE confirmation is only legal AFTER az_resolve_service
+          // ran in the current turn. If the model skipped it, do the resolution here
+          // and either surface the result to the user (multi-match / not found) or
+          // splice it into the conversation so the model can ask for confirmation
+          // using the resolved name.
+          const isWriteConfirmation = /i will (trigger|build|deploy|run|release)|build and release/i.test(reply);
+          const resolvedThisTurn = recentCalls.some((k) => {
+            try { return JSON.parse(k).tool === "az_resolve_service"; } catch { return false; }
+          });
+
+          // If the resolver ran but came back ambiguous/not-found, the model must not
+          // proceed with a confirmation in this turn.
+          if (isWriteConfirmation && resolvedThisTurn && lastResolverUnresolved) {
+            console.log(chalk.yellow("\n  Resolve the service name first — see the message above.\n"));
+            conversation.push({ role: "assistant", content: reply });
+            responded = true;
+            break;
+          }
+
+          if (isWriteConfirmation && !resolvedThisTurn) {
+            // Pull the service name(s) out of the model's confirmation: the segment
+            // between "for ..." and " from ..." in phrasings like
+            //   "I will trigger a build for `seller-core` from branch temp/pending-apis."
+            //   "I will trigger builds and releases for foo, bar from branch dev to dev environment."
+            const m = reply.match(/for\s+(?:the\s+)?[`"']?([a-zA-Z0-9_\-]+(?:[\s,]+(?:and\s+)?[a-zA-Z0-9_\-]+)*)[`"']?(?:\s+services?)?\s+from/i);
+            const STOPWORDS = new Set(["the", "and", "service", "services", "a"]);
+            const names = m
+              ? m[1]
+                  .split(/[\s,]+/)
+                  .map((s) => s.trim())
+                  .filter((s) => s && !STOPWORDS.has(s.toLowerCase()))
+              : [];
+
+            if (names.length === 0) {
+              // Couldn't parse a name — fall back to nudging the model.
+              conversation.push({ role: "assistant", content: reply });
+              conversation.push({
+                role: "user",
+                content:
+                  "Call az_resolve_service for the service named in my last request before asking for confirmation.",
+              });
+              continue;
+            }
+
+            const resolved = [];
+            let halt = false;
+            for (const name of names) {
+              const result = await runTool(tools, "az_resolve_service", { service_name: name });
+              recentCalls.push(JSON.stringify({ tool: "az_resolve_service", args: { service_name: name } }));
+
+              if (result.startsWith("Multiple services match") || result.startsWith("No service found")) {
+                console.log("\n" + result + "\n");
+                conversation.push({ role: "assistant", content: result });
+                halt = true;
+                break;
+              }
+              resolved.push(result);
+            }
+
+            if (halt) {
+              responded = true;
+              break;
+            }
+
+            // Single matches for every name — hand the resolutions back to the model
+            // and let it produce the confirmation using the resolved names.
+            conversation.push({ role: "assistant", content: reply });
+            conversation.push({
+              role: "user",
+              content:
+                `Resolved services:\n${resolved.join("\n\n")}\n\n` +
+                `Now ask me for ONE confirmation using ONLY the names from the "Service:" lines above. ` +
+                `Use the format "I will trigger ... from branch <branch>. Shall I proceed? (yes/no)".`,
+            });
+            continue;
+          }
+
           // Show the message without the yes/no part
           const cleanReply = reply.replace(/\s*\(yes\/no.*?\)/gi, "").replace(/\s*Shall I proceed\?/gi, "").trim();
           for (const char of cleanReply) {
@@ -833,6 +1037,12 @@ async function startAgent() {
       try {
         const result = await runTool(tools, toolName, toolArgs);
         spinner.succeed(chalk.gray(`${toolName} `) + chalk.green("done"));
+
+        if (toolName === "az_resolve_service") {
+          const r = String(result);
+          lastResolverUnresolved =
+            r.startsWith("Multiple services match") || r.startsWith("No service found");
+        }
 
         debugLog(`Tool Result: ${toolName}`, result);
 
