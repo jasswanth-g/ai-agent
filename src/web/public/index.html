@@ -52,8 +52,21 @@
     display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer;
   }
   .service-item:hover { background: var(--panel); }
-  .service-item input { accent-color: var(--accent); width: 16px; height: 16px; }
   .service-item .name { font-size: 13px; }
+  /* Custom dark checkbox (services, parallel, secret toggles) */
+  input[type="checkbox"] {
+    appearance: none; -webkit-appearance: none; margin: 0; flex: none;
+    width: 18px; height: 18px; border-radius: 5px; cursor: pointer; position: relative;
+    border: 1.5px solid var(--border); background: var(--panel-2);
+    transition: background .12s, border-color .12s;
+  }
+  input[type="checkbox"]:hover { border-color: var(--accent); }
+  input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+  input[type="checkbox"]:checked::after {
+    content: ""; position: absolute; left: 5px; top: 1.5px;
+    width: 4px; height: 9px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+  }
+  input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .service-item .ids { color: var(--muted); font-size: 11px; margin-left: auto; }
   .btn {
     background: var(--accent-2); color: #fff; border: none; border-radius: 8px; padding: 8px 14px;
@@ -144,6 +157,57 @@
   }
   #view-ondc textarea:focus { outline: none; border-color: var(--accent); }
   @media (max-width: 860px) { .ondc-panels { grid-template-columns: 1fr; } }
+  /* Credentials vault */
+  #view-creds { height: calc(100vh - 57px); overflow: auto; }
+  .creds-wrap { padding: 18px 24px; max-width: 1000px; margin: 0 auto; }
+  .creds-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .creds-hint { font-size: 11px; color: var(--warn); margin-bottom: 16px; }
+  .cred-group { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 14px; background: var(--panel); }
+  .cred-group-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .cred-group-head input.gname {
+    background: transparent; border: none; color: var(--text); font-size: 14px; font-weight: 600;
+    flex: 1; padding: 4px 6px; border-radius: 6px;
+  }
+  .cred-group-head input.gname:focus { outline: none; background: var(--panel-2); }
+  .cred-rows { padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .cred-row { display: flex; align-items: center; gap: 8px; }
+  .cred-row input.clabel { width: 200px; flex: none; }
+  .cred-row input.cvalue { flex: 1; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+  .cred-row input {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 7px 9px; font-size: 13px;
+  }
+  .cred-row input:focus { outline: none; border-color: var(--accent); }
+  .cred-row .icon-btn {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+    border-radius: 6px; width: 30px; height: 30px; flex: none; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 13px;
+  }
+  .cred-row .icon-btn:hover { color: var(--text); border-color: var(--accent); }
+  .cred-row label.secret-tg { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); white-space: nowrap; cursor: pointer; }
+  .cred-row .del { color: var(--err); }
+  .cred-empty { color: var(--muted); font-size: 13px; padding: 24px; text-align: center; }
+  .copied-flash { color: var(--ok) !important; border-color: var(--ok) !important; }
+  /* read-only display rows */
+  .cred-group-head .gname-txt { flex: 1; font-size: 14px; font-weight: 600; padding: 4px 6px; }
+  .cred-row .clabel-txt { width: 200px; flex: none; color: var(--muted); font-size: 13px; }
+  .cred-row .cval { flex: 1; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; word-break: break-all; }
+  .cred-row .cval.masked { letter-spacing: 2px; color: var(--muted); }
+  .cred-row.editing { background: var(--panel-2); border-radius: 8px; padding: 6px; }
+  /* ⋮ overflow menu */
+  .dots-wrap { position: relative; flex: none; }
+  .dots-menu {
+    position: absolute; right: 0; top: 34px; z-index: 30; display: none; min-width: 150px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 4px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45);
+  }
+  .dots-menu.open { display: block; }
+  .dots-item {
+    display: block; width: 100%; text-align: left; background: transparent; border: none;
+    color: var(--text); padding: 8px 10px; border-radius: 6px; font-size: 13px; cursor: pointer;
+  }
+  .dots-item:hover { background: var(--chip); }
+  .dots-item.danger { color: var(--err); }
 </style>
 </head>
 <body>
@@ -152,6 +216,7 @@
   <nav class="tabs">
     <button class="tab active" data-view="deploy">Build &amp; Release</button>
     <button class="tab" data-view="ondc">ONDC Search</button>
+    <button class="tab" data-view="creds">Credentials</button>
   </nav>
   <button id="sound-toggle" class="sound-toggle" title="Completion sound" aria-pressed="true">
     <svg class="bell" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -243,6 +308,20 @@
         <pre id="ondc-response">Awaiting trigger…</pre>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- CREDENTIALS / REFERENCE vault view -->
+<div id="view-creds" class="view" style="display:none;">
+  <div class="creds-wrap">
+    <div class="creds-bar">
+      <input id="creds-search" class="search" style="max-width:280px;" placeholder="Search credentials…" />
+      <button id="creds-add-group" class="btn ghost">+ Add group</button>
+      <span id="creds-status" class="sub" style="margin-left:auto;"></span>
+      <button id="creds-save" class="btn">Save</button>
+    </div>
+    <div class="creds-hint sub">Stored locally on this machine in a gitignored file. Don't put production secrets here unless you trust this host.</div>
+    <div id="creds-groups"></div>
   </div>
 </div>
 
@@ -849,13 +928,158 @@ $("#ondc-env").addEventListener("change", ondcRefresh);
 $("#ondc-regen").addEventListener("click", ondcRefresh);
 $("#ondc-trigger").addEventListener("click", ondcTrigger);
 
+// ===========================================================================
+// Credentials / Reference vault — grouped key/value store persisted server-side
+// (GET/PUT /api/credentials). Secret rows are masked with show/hide + copy.
+// ===========================================================================
+let credsData = { groups: [] };
+let credsDirty = false;
+let _cid = 0;
+const newId = () => `c${++_cid}-${Date.now().toString(36)}`;
+function setCredsDirty(on) {
+  credsDirty = on;
+  $("#creds-status").textContent = on ? "Unsaved changes" : "";
+  $("#creds-status").style.color = on ? "var(--warn)" : "var(--muted)";
+}
+async function loadCreds() {
+  try {
+    const res = await fetch("/api/credentials");
+    const data = await res.json();
+    credsData = data && Array.isArray(data.groups) ? data : { groups: [] };
+  } catch { credsData = { groups: [] }; }
+  setCredsDirty(false);
+  renderCreds();
+}
+// Small ⋮ overflow menu. items: [{ label, fn, danger }]
+function dotsMenu(items) {
+  const btn = el("button", { class: "icon-btn", title: "More" }, "⋮");
+  const menu = el("div", { class: "dots-menu" });
+  items.forEach((it) => menu.append(el("button", {
+    class: "dots-item" + (it.danger ? " danger" : ""),
+    onclick: (e) => { e.stopPropagation(); closeMenus(); it.fn(); },
+  }, it.label)));
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = menu.classList.contains("open");
+    closeMenus();
+    if (!open) menu.classList.add("open");
+  });
+  return el("div", { class: "dots-wrap" }, btn, menu);
+}
+function closeMenus() { document.querySelectorAll(".dots-menu.open").forEach((m) => m.classList.remove("open")); }
+
+// Inline eye / eye-off icon (stroke = currentColor, so it matches the icon button)
+function eyeSvg(revealed) {
+  const open = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  const off = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20C5 20 1 12 1 12a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>';
+  return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${revealed ? off : open}</svg>`;
+}
+
+function renderCreds() {
+  const wrap = $("#creds-groups");
+  const q = ($("#creds-search").value || "").toLowerCase();
+  wrap.innerHTML = "";
+  if (!credsData.groups.length) {
+    wrap.append(el("div", { class: "cred-empty", html: "No credentials yet. Click <b>+ Add group</b> to start." }));
+    return;
+  }
+  credsData.groups.forEach((g) => {
+    const rows = g.rows || (g.rows = []);
+    const matchG = !q || g.name.toLowerCase().includes(q);
+    const visibleRows = rows.filter((r) => matchG || r.label.toLowerCase().includes(q) || r.value.toLowerCase().includes(q));
+    if (q && !matchG && visibleRows.length === 0) return;
+
+    const nameEl = g._renaming
+      ? el("input", { class: "gname", value: g.name, placeholder: "Group name",
+          oninput: (e) => { g.name = e.target.value; setCredsDirty(true); },
+          onblur: () => { g._renaming = false; renderCreds(); } })
+      : el("span", { class: "gname-txt" }, g.name || "Untitled group");
+    const head = el("div", { class: "cred-group-head" },
+      nameEl,
+      dotsMenu([
+        { label: "+ Add row", fn: () => { rows.push({ id: newId(), label: "", value: "", secret: true, _editing: true }); setCredsDirty(true); renderCreds(); } },
+        { label: "Rename group", fn: () => { g._renaming = true; renderCreds(); setTimeout(() => { const i = head.querySelector("input.gname"); if (i) i.focus(); }, 0); } },
+        { label: "Delete group", danger: true, fn: () => { if (confirm(`Delete group "${g.name || "untitled"}"?`)) { credsData.groups = credsData.groups.filter((x) => x !== g); setCredsDirty(true); renderCreds(); } } },
+      ]),
+    );
+    const rowsWrap = el("div", { class: "cred-rows" });
+    if (!visibleRows.length) rowsWrap.append(el("div", { class: "sub", style: "padding:4px 2px;font-size:12px;" }, "No entries — use ⋮ → Add row."));
+    visibleRows.forEach((r) => rowsWrap.append(r._editing ? credRowEdit(g, r) : credRowView(g, r)));
+    wrap.append(el("div", { class: "cred-group" }, head, rowsWrap));
+  });
+}
+
+// Read-only display row — masked secret, show/hide, copy, ⋮ (Edit / Delete).
+function credRowView(g, r) {
+  const masked = r.secret && !r._reveal;
+  const valEl = el("span", { class: "cval" + (masked ? " masked" : "") }, masked ? "••••••••" : (r.value || "—"));
+  const copy = el("button", { class: "icon-btn", title: "Copy value",
+    onclick: () => navigator.clipboard.writeText(r.value || "").then(() => {
+      copy.textContent = "✓"; copy.classList.add("copied-flash");
+      setTimeout(() => { copy.textContent = "⧉"; copy.classList.remove("copied-flash"); }, 1000);
+    }) }, "⧉");
+  const kids = [el("span", { class: "clabel-txt" }, r.label || "(no label)"), valEl];
+  if (r.secret) kids.push(el("button", { class: "icon-btn", title: r._reveal ? "Hide" : "Show",
+    html: eyeSvg(r._reveal),
+    onclick: () => { r._reveal = !r._reveal; renderCreds(); } }));
+  kids.push(copy, dotsMenu([
+    { label: "Edit", fn: () => { r._editing = true; renderCreds(); } },
+    { label: "Delete", danger: true, fn: () => { g.rows = g.rows.filter((x) => x !== r); setCredsDirty(true); renderCreds(); } },
+  ]));
+  return el("div", { class: "cred-row" }, ...kids);
+}
+
+// Edit row — inline inputs; ✓ Done returns to read-only view.
+function credRowEdit(g, r) {
+  const done = () => { r._editing = false; r._reveal = false; renderCreds(); };
+  return el("div", { class: "cred-row editing" },
+    el("input", { class: "clabel", value: r.label, placeholder: "label",
+      oninput: (e) => { r.label = e.target.value; setCredsDirty(true); } }),
+    el("input", { class: "cvalue", value: r.value, placeholder: "value", type: "text",
+      oninput: (e) => { r.value = e.target.value; setCredsDirty(true); },
+      onkeydown: (e) => { if (e.key === "Enter") done(); } }),
+    el("label", { class: "secret-tg" },
+      el("input", { type: "checkbox", ...(r.secret ? { checked: "checked" } : {}),
+        onchange: (e) => { r.secret = e.target.checked; setCredsDirty(true); } }), "secret"),
+    el("button", { class: "icon-btn", title: "Done", onclick: done }, "✓"),
+    el("button", { class: "icon-btn del", title: "Delete row",
+      onclick: () => { g.rows = g.rows.filter((x) => x !== r); setCredsDirty(true); renderCreds(); } }, "✕"),
+  );
+}
+async function saveCreds() {
+  const btn = $("#creds-save"); btn.disabled = true;
+  // strip transient UI flags (_editing/_reveal/_renaming) before persisting
+  const groups = credsData.groups.map((g) => ({
+    id: g.id, name: g.name,
+    rows: (g.rows || []).map((r) => ({ id: r.id, label: r.label, value: r.value, secret: !!r.secret })),
+  }));
+  try {
+    const res = await fetch("/api/credentials", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groups }),
+    });
+    if (res.ok) { setCredsDirty(false); $("#creds-status").textContent = "Saved"; $("#creds-status").style.color = "var(--ok)"; }
+    else { const d = await res.json().catch(() => ({})); toast(d.error || "Save failed"); }
+  } catch (e) { toast("Save failed: " + e.message); }
+  finally { btn.disabled = false; }
+}
+$("#creds-add-group").addEventListener("click", () => {
+  credsData.groups.push({ id: newId(), name: "New group", rows: [] });
+  setCredsDirty(true); renderCreds();
+});
+$("#creds-save").addEventListener("click", saveCreds);
+$("#creds-search").addEventListener("input", renderCreds);
+document.addEventListener("click", closeMenus); // close any open ⋮ menu on outside click
+
 // ---- tab switching ----
-let _ondcInit = false;
+let _ondcInit = false, _credsInit = false;
 function switchView(view) {
   document.querySelectorAll(".tabs .tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
   $("#view-deploy").style.display = view === "deploy" ? "" : "none";
   $("#view-ondc").style.display = view === "ondc" ? "" : "none";
+  $("#view-creds").style.display = view === "creds" ? "" : "none";
   if (view === "ondc" && !_ondcInit) { _ondcInit = true; ondcRefresh(); }
+  if (view === "creds" && !_credsInit) { _credsInit = true; loadCreds(); }
 }
 document.querySelectorAll(".tabs .tab").forEach((t) => t.addEventListener("click", () => switchView(t.dataset.view)));
 

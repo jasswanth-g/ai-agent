@@ -29,6 +29,20 @@ const { SERVICE_ALIASES } = require("../config/serviceAliases");
 const PORT = Number(process.env.QWIPO_WEB_PORT) || 4317;
 const PUBLIC_DIR = path.join(__dirname, "public");
 
+// Local credential/reference vault — a plaintext JSON file on this machine,
+// gitignored. Stores tokens, test/dev creds, app mobile numbers, etc.
+const CREDENTIALS_FILE = path.join(__dirname, "credentials.json");
+function readCredentials() {
+  try {
+    return JSON.parse(fs.readFileSync(CREDENTIALS_FILE, "utf8"));
+  } catch {
+    return { groups: [] };
+  }
+}
+function writeCredentials(data) {
+  fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+}
+
 // Branches pre-pinned to the top of every branch dropdown as quick defaults.
 const DEFAULT_BRANCHES = ["dev", "testing", "main"];
 
@@ -446,6 +460,21 @@ const server = http.createServer(async (req, res) => {
     // --- status: snapshot of the current/last run (used to reattach on refresh) ---
     if (req.method === "GET" && pathname === "/api/status") {
       return sendJson(res, 200, { run: currentRun });
+    }
+
+    // --- credential vault: read + save the whole document ---
+    if (req.method === "GET" && pathname === "/api/credentials") {
+      return sendJson(res, 200, readCredentials());
+    }
+    if (req.method === "PUT" && pathname === "/api/credentials") {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      if (!Array.isArray(body.groups)) return sendJson(res, 400, { error: "expected { groups: [...] }" });
+      try {
+        writeCredentials({ groups: body.groups });
+        return sendJson(res, 200, { ok: true });
+      } catch (err) {
+        return sendJson(res, 500, { error: `Could not save: ${err.message}` });
+      }
     }
 
     // --- ONDC search proxy: forwards the payload to the ONDC core endpoint ---
