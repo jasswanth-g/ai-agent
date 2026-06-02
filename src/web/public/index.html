@@ -551,8 +551,9 @@ function buildOverrideRow(name, job) {
   envSel.append(optionEl("", `(global: ${state.environment})`, !job.envOverride));
   ENV_OPTIONS.forEach((env) => envSel.append(optionEl(env, env, job.envOverride === env)));
 
-  // Mirror the global action's relevance + lock everything while a run is live.
-  branchSel.disabled = state.running || state.action === "release";
+  // Branch drives both build and release, so it's relevant for every action.
+  // Env is only irrelevant for build-only. Everything locks while a run is live.
+  branchSel.disabled = state.running;
   envSel.disabled = state.running || state.action === "build";
 
   return el("div", { class: "row" },
@@ -675,7 +676,7 @@ function setRunningUI() {
   // lock the top controls while a run is in progress
   const lock = state.running;
   $("#action").disabled = lock;
-  $("#build-branch").disabled = lock || state.action === "release";
+  $("#build-branch").disabled = lock; // branch drives both build and release
   $("#release-env").disabled = lock || state.action === "build";
   $("#clear").disabled = lock;
   // Parallel checkbox only applies to single-phase actions (build-only / release-only).

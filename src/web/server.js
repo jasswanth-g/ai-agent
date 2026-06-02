@@ -213,13 +213,15 @@ async function runJob(job, emit, isAborted = () => false) {
     return { service, ok: false };
   }
 
-  // Release environment -> branch the release pipeline runs from.
-  const ENV_BRANCH = { dev: "dev", testing: "testing", production: "main" };
-  if (doRelease && !ENV_BRANCH[environment]) {
+  // The release runs from the SAME branch the user selected (so a build from
+  // `june2` releases from `june2`), passing `environment` as the deploy target.
+  // Production is the one exception: it stays pinned to `main` for safety.
+  const ALLOWED_ENVS = ["dev", "testing", "production"];
+  if (doRelease && !ALLOWED_ENVS.includes(environment)) {
     send(firstPhase, "error", { message: `Environment "${environment}" not allowed (dev, testing, or production).` });
     return { service, ok: false };
   }
-  const releaseBranch = ENV_BRANCH[environment];
+  const releaseBranch = environment === "production" ? "main" : (branch || "dev");
 
   // ---- BUILD ----
   if (doBuild) {
@@ -261,6 +263,10 @@ async function runJob(job, emit, isAborted = () => false) {
   // ---- RELEASE ---- (when building too, only reached after a successful build)
   if (doRelease) {
     if (isAborted()) return { service, ok: false, aborted: true }; // disconnected before release
+    if (releaseBranch.toLowerCase() === "master") {
+      send("release", "error", { message: "Releasing from master is not allowed." });
+      return { service, ok: false };
+    }
     send("release", "queued", { branch: releaseBranch, environment });
     let release;
     try {
