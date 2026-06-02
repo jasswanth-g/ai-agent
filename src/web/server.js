@@ -19,6 +19,7 @@
  */
 
 const http = require("http");
+const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const { execAzCli } = require("../utils/shell");
@@ -30,6 +31,46 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 
 // Branches pre-pinned to the top of every branch dropdown as quick defaults.
 const DEFAULT_BRANCHES = ["dev", "testing", "main"];
+
+// ONDC search endpoints per environment. Kept server-side so the browser never
+// picks an arbitrary target — the client only sends the env key + payload.
+const ONDC_URLS = {
+  dev: "https://ondc.dev.bms.qwipo.com/api/v1/core/process",
+  test: "https://ondc.test.bms.qwipo.com/api/v1/core/process",
+  prod: "https://ondc-svc.qwipo.com/api/v1/core/process",
+};
+
+/** POST a JSON body to an https URL and resolve { status, body, elapsed }. Proxies
+ *  ONDC search calls so the browser doesn't hit CORS against the ONDC hosts. */
+function httpsPostJson(targetUrl, obj) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(obj);
+    const u = new URL(targetUrl);
+    const req = https.request(
+      {
+        method: "POST",
+        hostname: u.hostname,
+        port: u.port || 443,
+        path: u.pathname + u.search,
+        headers: {
+          "Content-Type": "application/json",
+          accept: "application/json",
+          "Content-Length": Buffer.byteLength(data),
+        },
+        timeout: 30000,
+      },
+      (resp) => {
+        let body = "";
+        resp.on("data", (c) => (body += c));
+        resp.on("end", () => resolve({ status: resp.statusCode, body }));
+      }
+    );
+    req.on("timeout", () => req.destroy(new Error("request timed out after 30s")));
+    req.on("error", reject);
+    req.write(data);
+    req.end();
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Azure helpers
@@ -405,6 +446,21 @@ const server = http.createServer(async (req, res) => {
     // --- status: snapshot of the current/last run (used to reattach on refresh) ---
     if (req.method === "GET" && pathname === "/api/status") {
       return sendJson(res, 200, { run: currentRun });
+    }
+
+    // --- ONDC search proxy: forwards the payload to the ONDC core endpoint ---
+    if (req.method === "POST" && pathname === "/api/ondc-search") {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      const target = ONDC_URLS[body.env];
+      if (!target) return sendJson(res, 400, { error: `Unknown ONDC env "${body.env}" (dev, test, or prod).` });
+      if (!body.payload || typeof body.payload !== "object") return sendJson(res, 400, { error: "missing payload" });
+      const startedAt = Date.now();
+      try {
+        const { status, body: respBody } = await httpsPostJson(target, body.payload);
+        return sendJson(res, 200, { ok: status >= 200 && status < 300, status, body: respBody, elapsed: Date.now() - startedAt });
+      } catch (err) {
+        return sendJson(res, 502, { error: `ONDC request failed: ${err.message}`, elapsed: Date.now() - startedAt });
+      }
     }
 
     // --- stop: abort the in-progress run (no further services are triggered) ---

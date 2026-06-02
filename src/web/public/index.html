@@ -111,12 +111,48 @@
     background: var(--panel-2); border: 1px solid var(--border); padding: 10px 16px; border-radius: 8px;
     font-size: 13px; display: none;
   }
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; margin-left: 8px; }
+  .tabs .tab {
+    background: transparent; border: 1px solid transparent; color: var(--muted);
+    padding: 6px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; transition: all .15s;
+  }
+  .tabs .tab:hover { color: var(--text); }
+  .tabs .tab.active { background: var(--panel-2); border-color: var(--border); color: var(--text); }
+  /* ONDC Search view */
+  #view-ondc { height: calc(100vh - 57px); overflow: auto; }
+  .ondc-wrap { display: flex; flex-direction: column; gap: 14px; padding: 18px 24px; height: 100%; min-height: 0; }
+  .ondc-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .ondc-url {
+    font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; color: var(--muted);
+    background: var(--chip); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
+    flex: 1; min-width: 260px; word-break: break-all;
+  }
+  .ondc-status { font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 6px; }
+  .ondc-status.ok { background: rgba(62,207,142,.15); color: var(--ok); }
+  .ondc-status.err { background: rgba(255,107,107,.15); color: var(--err); }
+  .ondc-status.pending { background: rgba(245,177,76,.15); color: var(--warn); }
+  .ondc-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1; min-height: 0; }
+  .ondc-col { display: flex; flex-direction: column; min-height: 0; }
+  .ondc-col-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 13px; color: var(--muted); }
+  #view-ondc textarea, #view-ondc pre {
+    flex: 1; min-height: 360px; width: 100%; margin: 0;
+    font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5;
+    padding: 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: #0b0d12; color: var(--text); resize: none; overflow: auto;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  #view-ondc textarea:focus { outline: none; border-color: var(--accent); }
+  @media (max-width: 860px) { .ondc-panels { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
 <header>
-  <h1>Qwipo · Build &amp; Release</h1>
-  <span class="sub">Select services → pick build branch → build &amp; release runs one by one</span>
+  <h1>Qwipo</h1>
+  <nav class="tabs">
+    <button class="tab active" data-view="deploy">Build &amp; Release</button>
+    <button class="tab" data-view="ondc">ONDC Search</button>
+  </nav>
   <button id="sound-toggle" class="sound-toggle" title="Completion sound" aria-pressed="true">
     <svg class="bell" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -126,6 +162,7 @@
   </button>
 </header>
 
+<div id="view-deploy" class="view">
 <div class="layout">
   <!-- LEFT: services multi-select -->
   <div class="left">
@@ -170,6 +207,41 @@
     <div class="footer">
       <span id="summary" class="summary"></span>
       <button id="deploy" class="btn" disabled>Build &amp; Release</button>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ONDC SEARCH view -->
+<div id="view-ondc" class="view" style="display:none;">
+  <div class="ondc-wrap">
+    <div class="ondc-bar">
+      <label class="fld">Environment</label>
+      <select id="ondc-env" style="min-width:170px;">
+        <option value="dev" selected>DEV</option>
+        <option value="test">TEST</option>
+        <option value="prod">PROD (MAIN)</option>
+      </select>
+      <span id="ondc-url" class="ondc-url"></span>
+      <button id="ondc-regen" class="btn ghost">Regenerate IDs</button>
+      <button id="ondc-trigger" class="btn">Trigger Search</button>
+      <span id="ondc-status" class="ondc-status"></span>
+    </div>
+    <div class="ondc-panels">
+      <div class="ondc-col">
+        <div class="ondc-col-head">
+          <span>Request Payload (inner body)</span>
+          <span id="ondc-ids" class="sub" style="font-size:11px;"></span>
+        </div>
+        <textarea id="ondc-payload" spellcheck="false"></textarea>
+      </div>
+      <div class="ondc-col">
+        <div class="ondc-col-head">
+          <span>Response</span>
+          <span id="ondc-meta" class="sub" style="font-size:11px;"></span>
+        </div>
+        <pre id="ondc-response">Awaiting trigger…</pre>
+      </div>
     </div>
   </div>
 </div>
@@ -674,6 +746,119 @@ $("#clear").addEventListener("click", () => { state.selected.clear(); resetGloba
 $("#deploy").addEventListener("click", () => { state.running ? stopRun() : deploy(); });
 $("#sound-toggle").addEventListener("click", toggleSound);
 renderSoundToggle();
+
+// ===========================================================================
+// ONDC Search tab — builds a fresh ONDC search payload and triggers it via the
+// server (POST /api/ondc-search) to avoid browser CORS to the ONDC endpoints.
+// ===========================================================================
+const ONDC_URLS = {
+  dev: "https://ondc.dev.bms.qwipo.com/api/v1/core/process",
+  test: "https://ondc.test.bms.qwipo.com/api/v1/core/process",
+  prod: "https://ondc-svc.qwipo.com/api/v1/core/process",
+};
+const ONDC_BAP = {
+  dev: { bap_id: "ondc.dev.bms.qwipo.com", bap_uri: "https://ondc.dev.bms.qwipo.com/api/v1/retail_eb2b_buyer", bpp_id: "ondc.dev.bms.qwipo.com", bpp_uri: "https://marketplace-connector.dev.bms.qwipo.com/api/internal/ondc" },
+  test: { bap_id: "ondc.test.bms.qwipo.com", bap_uri: "https://ondc.test.bms.qwipo.com/api/v1/retail_eb2b_buyer", bpp_id: "ondc.test.bms.qwipo.com", bpp_uri: "https://marketplace-connector.test.bms.qwipo.com/api/internal/ondc" },
+  prod: { bap_id: "ondc-svc.qwipo.com", bap_uri: "https://ondc-svc.qwipo.com/api/v1/retail_eb2b_buyer" }, // prod omits bpp_id / bpp_uri
+};
+function ondcUuid() {
+  if (window.crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0; const v = c === "x" ? r : (r & 0x3) | 0x8; return v.toString(16);
+  });
+}
+function ondcBuildInner(env) {
+  const cfg = ONDC_BAP[env];
+  const context = {
+    domain: "ONDC:RETeB2B", action: "search", country: "IND", city: "std:040", core_version: "1.2.5",
+    bap_id: cfg.bap_id, bap_uri: cfg.bap_uri,
+  };
+  if (cfg.bpp_id) context.bpp_id = cfg.bpp_id;
+  if (cfg.bpp_uri) context.bpp_uri = cfg.bpp_uri;
+  context.transaction_id = ondcUuid();
+  context.message_id = ondcUuid();
+  context.timestamp = new Date().toISOString();
+  context.ttl = "PT30M";
+  return {
+    context,
+    message: { intent: {
+      fulfillment: { type: "Delivery" },
+      payment: { "@ondc/org/buyer_app_finder_fee_type": "percent", "@ondc/org/buyer_app_finder_fee_amount": "3.54" },
+      tags: [
+        { code: "bap_terms", list: [
+          { code: "static_terms", value: "" },
+          { code: "static_terms_new", value: "https://github.com/ONDC-Official/NP-Static-Terms/buyerNP_BNP/1.0/tc.pdf" },
+          { code: "effective_date", value: "2025-02-01T00:00:00.000Z" },
+        ] },
+        { code: "bap_features", list: [
+          { code: "01A", value: "yes" }, { code: "0091", value: "yes" }, { code: "0092", value: "yes" },
+          { code: "0093", value: "yes" }, { code: "0094", value: "yes" },
+        ] },
+      ],
+    } },
+  };
+}
+const ondcSetStatus = (text, kind) => { const s = $("#ondc-status"); s.textContent = text; s.className = "ondc-status" + (kind ? " " + kind : ""); };
+function ondcRefresh() {
+  const env = $("#ondc-env").value;
+  $("#ondc-url").textContent = ONDC_URLS[env];
+  const inner = ondcBuildInner(env);
+  $("#ondc-payload").value = JSON.stringify(inner, null, 2);
+  $("#ondc-ids").textContent = `txn: ${inner.context.transaction_id.slice(0,8)}… msg: ${inner.context.message_id.slice(0,8)}… @ ${inner.context.timestamp}`;
+}
+async function ondcTrigger() {
+  const env = $("#ondc-env").value;
+  let innerObj;
+  try { innerObj = JSON.parse($("#ondc-payload").value); }
+  catch (e) { ondcSetStatus("Invalid JSON in payload", "err"); return; }
+
+  // Always refresh ids + timestamp on every trigger
+  innerObj.context = innerObj.context || {};
+  innerObj.context.transaction_id = ondcUuid();
+  innerObj.context.message_id = ondcUuid();
+  innerObj.context.timestamp = new Date().toISOString();
+  $("#ondc-payload").value = JSON.stringify(innerObj, null, 2);
+  $("#ondc-ids").textContent = `txn: ${innerObj.context.transaction_id.slice(0,8)}… msg: ${innerObj.context.message_id.slice(0,8)}… @ ${innerObj.context.timestamp}`;
+
+  const wrapper = { npType: "BAP", action: "search", domain: "Retail", body: innerObj };
+
+  ondcSetStatus("Sending…", "pending");
+  const btn = $("#ondc-trigger"); btn.disabled = true;
+  $("#ondc-response").textContent = "Sending request…"; $("#ondc-meta").textContent = "";
+  try {
+    const res = await fetch("/api/ondc-search", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env, payload: wrapper }),
+    });
+    const data = await res.json();
+    if (!res.ok && data.error) {
+      $("#ondc-response").textContent = "Error: " + data.error;
+      $("#ondc-meta").textContent = ""; ondcSetStatus("Failed", "err"); return;
+    }
+    let pretty = data.body;
+    try { pretty = JSON.stringify(JSON.parse(data.body), null, 2); } catch (_) {}
+    $("#ondc-response").textContent = pretty || "(empty response)";
+    $("#ondc-meta").textContent = `HTTP ${data.status} • ${data.elapsed} ms`;
+    ondcSetStatus(data.ok ? `OK ${data.status}` : `Failed ${data.status}`, data.ok ? "ok" : "err");
+  } catch (err) {
+    $("#ondc-response").textContent = "Request failed: " + (err && err.message ? err.message : err);
+    ondcSetStatus("Error", "err");
+  } finally { btn.disabled = false; }
+}
+$("#ondc-env").addEventListener("change", ondcRefresh);
+$("#ondc-regen").addEventListener("click", ondcRefresh);
+$("#ondc-trigger").addEventListener("click", ondcTrigger);
+
+// ---- tab switching ----
+let _ondcInit = false;
+function switchView(view) {
+  document.querySelectorAll(".tabs .tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
+  $("#view-deploy").style.display = view === "deploy" ? "" : "none";
+  $("#view-ondc").style.display = view === "ondc" ? "" : "none";
+  if (view === "ondc" && !_ondcInit) { _ondcInit = true; ondcRefresh(); }
+}
+document.querySelectorAll(".tabs .tab").forEach((t) => t.addEventListener("click", () => switchView(t.dataset.view)));
+
 init();
 </script>
 </body>
