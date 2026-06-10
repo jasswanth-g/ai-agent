@@ -165,17 +165,17 @@ async function queueRelease(definitionId, branch, environment) {
 }
 
 /**
- * Poll a queued build/release until it completes (or times out).
+ * Poll a queued build/release until it completes.
  * Emits progress via onTick(build) so the UI can show elapsed seconds + status.
- * Mirrors the timings used by the CLI tools (60s initial, then 15s, 5 min ceiling).
+ * No time ceiling — keeps polling (60s initial, then 15s) until Azure reports
+ * "completed" or the client disconnects (isAborted).
  */
 async function pollUntilDone(buildId, onTick, isAborted = () => false) {
   const INITIAL_POLL_DELAY = 60000;
   const POLL_INTERVAL = 15000;
-  const MAX_POLLS = 17; // 60s + 16 × 15s = 5 min
   const start = Date.now();
 
-  for (let i = 0; i < MAX_POLLS; i++) {
+  for (let i = 0; ; i++) {
     await new Promise((r) => setTimeout(r, i === 0 ? INITIAL_POLL_DELAY : POLL_INTERVAL));
     if (isAborted()) return null; // client disconnected — stop polling Azure
     try {
@@ -187,7 +187,6 @@ async function pollUntilDone(buildId, onTick, isAborted = () => false) {
       // transient error — keep polling
     }
   }
-  return null; // timed out
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +248,7 @@ async function runJob(job, emit, isAborted = () => false) {
 
     if (isAborted()) return { service, ok: false, aborted: true };
     if (!finalBuild) {
-      send("build", "error", { buildId: build.id, message: "Build timed out after 5 min." + (doRelease ? " Release skipped." : "") });
+      send("build", "error", { buildId: build.id, message: "Build polling stopped." + (doRelease ? " Release skipped." : "") });
       return { service, ok: false };
     }
     if (finalBuild.result !== "succeeded") {
@@ -286,7 +285,7 @@ async function runJob(job, emit, isAborted = () => false) {
 
     if (isAborted()) return { service, ok: false, aborted: true };
     if (!finalRelease) {
-      send("release", "error", { releaseId: release.id, message: "Release timed out after 5 min." });
+      send("release", "error", { releaseId: release.id, message: "Release polling stopped." });
       return { service, ok: false };
     }
     if (finalRelease.result !== "succeeded") {
