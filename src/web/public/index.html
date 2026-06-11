@@ -93,6 +93,37 @@
     border-radius: 8px; padding: 7px 10px; outline: none; min-width: 180px;
   }
   select:focus { border-color: var(--accent); }
+  /* searchable-select (combobox) — dark, type-to-filter dropdown */
+  .ss { position: relative; display: inline-block; min-width: 160px; }
+  .ss-display {
+    width: 100%; text-align: left; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 28px 7px 10px;
+    outline: none; cursor: pointer; font: inherit; position: relative; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .ss-display:hover:not(:disabled) { border-color: var(--accent); }
+  .ss.open .ss-display { border-color: var(--accent); }
+  .ss-display:disabled { opacity: .5; cursor: not-allowed; }
+  .ss-display.placeholder { color: var(--muted); }
+  .ss-caret { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--muted); display: flex; }
+  .ss-panel {
+    display: none; position: absolute; z-index: 40; top: calc(100% + 4px); left: 0;
+    min-width: 100%; width: max-content; max-width: 320px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45); overflow: hidden;
+  }
+  .ss.open .ss-panel { display: block; }
+  .ss-search {
+    width: 100%; box-sizing: border-box; background: var(--panel-2); color: var(--text);
+    border: none; border-bottom: 1px solid var(--border); padding: 8px 10px; outline: none; font: inherit;
+  }
+  .ss-search::placeholder { color: var(--muted); }
+  .ss-list { max-height: 260px; overflow-y: auto; padding: 4px; }
+  .ss-opt { padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; }
+  .ss-opt:hover, .ss-opt.active { background: var(--panel-2); }
+  .ss-opt.sel { color: var(--accent); }
+  .ss-opt.sel::after { content: "✓"; float: right; margin-left: 12px; }
+  .ss-empty { padding: 10px; color: var(--muted); font-size: 12px; text-align: center; }
   .env-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   .env-toggle button { background: var(--panel-2); color: var(--muted); border: none; padding: 7px 14px; cursor: pointer; font-size: 12px; }
   .env-toggle button.active { background: var(--accent-2); color: #fff; }
@@ -253,11 +284,7 @@
         Trigger all in parallel
       </label>
       <label class="fld">Build branch</label>
-      <select id="build-branch" style="min-width:160px;">
-        <option value="dev" selected>dev</option>
-        <option value="testing">testing</option>
-        <option value="main">main</option>
-      </select>
+      <div id="build-branch" style="min-width:160px;"></div>
       <label class="fld">Release env</label>
       <select id="release-env" style="min-width:120px;">
         <option value="dev" selected>dev</option>
@@ -359,6 +386,74 @@ const toast = (msg) => {
   const t = $("#toast"); t.textContent = msg; t.style.display = "block";
   clearTimeout(t._t); t._t = setTimeout(() => t.style.display = "none", 3200);
 };
+
+// ---- searchable-select: a dark, type-to-filter combobox replacing <select> ----
+// opts: { value, placeholder, onChange(v), onOpen() }. Options are [{value,label}]
+// or plain strings. The returned element exposes .ss = { setOptions, setLoading,
+// getValue, setValue, setDisabled }.
+function closeAllSS(except) {
+  document.querySelectorAll(".ss.open").forEach((w) => { if (w !== except) w.classList.remove("open"); });
+}
+function searchableSelect(opts = {}) {
+  let options = [], current = opts.value || "", loading = false, disabled = false, active = -1;
+  const display = el("button", { class: "ss-display", type: "button" });
+  display.append(el("span", { class: "ss-label" }), el("span", { class: "ss-caret",
+    html: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 9l6 6 6-6"/></svg>' }));
+  const labelSpan = display.querySelector(".ss-label");
+  const search = el("input", { class: "ss-search", type: "text", placeholder: "Search…", spellcheck: "false" });
+  const list = el("div", { class: "ss-list" });
+  const panel = el("div", { class: "ss-panel" }, search, list);
+  const wrap = el("div", { class: "ss" }, display, panel);
+
+  const labelFor = (v) => { const o = options.find((x) => x.value === v); return o ? o.label : v; };
+  function renderDisplay() {
+    const has = current !== "" || options.some((o) => o.value === "");
+    labelSpan.textContent = current !== "" ? labelFor(current) : (labelFor("") || opts.placeholder || "Select…");
+    display.classList.toggle("placeholder", current === "" && !options.some((o) => o.value === ""));
+  }
+  function renderList() {
+    list.innerHTML = "";
+    if (loading) { list.append(el("div", { class: "ss-empty" }, "Loading…")); return; }
+    const f = search.value.trim().toLowerCase();
+    const items = options.filter((o) => o.label.toLowerCase().includes(f));
+    if (!items.length) { list.append(el("div", { class: "ss-empty" }, "No matches")); return; }
+    items.forEach((o, i) => {
+      const opt = el("div", { class: "ss-opt" + (o.value === current ? " sel" : "") + (i === active ? " active" : ""),
+        onclick: (e) => { e.stopPropagation(); choose(o.value); } }, o.label);
+      list.append(opt);
+    });
+  }
+  function open() {
+    if (disabled) return;
+    closeAllSS(wrap); wrap.classList.add("open");
+    search.value = ""; active = -1; renderList(); search.focus();
+    if (opts.onOpen) opts.onOpen();
+  }
+  function close() { wrap.classList.remove("open"); }
+  function choose(v) { current = v; renderDisplay(); close(); if (opts.onChange) opts.onChange(v); }
+
+  display.addEventListener("click", (e) => { e.stopPropagation(); wrap.classList.contains("open") ? close() : open(); });
+  search.addEventListener("click", (e) => e.stopPropagation());
+  search.addEventListener("input", () => { active = -1; renderList(); });
+  search.addEventListener("keydown", (e) => {
+    const items = options.filter((o) => o.label.toLowerCase().includes(search.value.trim().toLowerCase()));
+    if (e.key === "Escape") { close(); display.focus(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); active = Math.min(active + 1, items.length - 1); renderList(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); active = Math.max(active - 1, 0); renderList(); }
+    else if (e.key === "Enter") { e.preventDefault(); if (items[active]) choose(items[active].value); else if (items.length === 1) choose(items[0].value); }
+  });
+
+  wrap.ss = {
+    setOptions(arr) { options = (arr || []).map((x) => (typeof x === "string" ? { value: x, label: x } : x)); renderDisplay(); if (wrap.classList.contains("open")) renderList(); },
+    setLoading(b) { loading = b; if (wrap.classList.contains("open")) renderList(); },
+    getValue() { return current; },
+    setValue(v) { current = v == null ? "" : v; renderDisplay(); },
+    setDisabled(b) { disabled = b; display.disabled = b; if (b) close(); },
+    isOpen() { return wrap.classList.contains("open"); },
+  };
+  renderDisplay();
+  return wrap;
+}
 
 // ---- completion sound toggle (ring / silent) — persisted across reloads ----
 let soundOn = localStorage.getItem("qwipo-sound") !== "off"; // default ON
@@ -464,32 +559,23 @@ function toggleService(name, on) {
 
 // ---- overall build branch (lazy: fetched the first time the dropdown opens) ----
 // dev stays the default until the user opens the dropdown.
+let globalBranchSS = null; // searchable-select instance, created in the wire-up section
 function resetGlobalBranch() {
   state.branchesLoaded = false;
   state.branches = null;
-  const sel = $("#build-branch");
-  if (sel) {
-    // show dev/testing/main as defaults until the full list is fetched
-    const cur = state.branch || "dev";
-    const list = state.defaultBranches.slice();
-    if (!list.includes(cur)) list.unshift(cur);
-    sel.innerHTML = "";
-    list.forEach((b) => {
-      const o = document.createElement("option");
-      o.value = b; o.textContent = b; if (b === cur) o.selected = true;
-      sel.append(o);
-    });
-  }
+  if (!globalBranchSS) return;
+  // show dev/testing/main as defaults until the full list is fetched
+  const cur = state.branch || "dev";
+  const list = state.defaultBranches.slice();
+  if (!list.includes(cur)) list.unshift(cur);
+  globalBranchSS.ss.setOptions(list);
+  globalBranchSS.ss.setValue(cur);
 }
 
-async function loadGlobalBranches(selectEl) {
+async function loadGlobalBranches() {
   if (state.branchesLoading || state.selected.size === 0) return;
   state.branchesLoading = true;
-  if (selectEl && selectEl.isConnected) {
-    const hint = document.createElement("option");
-    hint.disabled = true; hint.textContent = "Loading branches…";
-    selectEl.append(hint); // transient hint without closing an open dropdown
-  }
+  if (globalBranchSS) globalBranchSS.ss.setLoading(true);
   try {
     // Union of branches across every selected service (different repos may differ).
     const names = [...state.selected.keys()];
@@ -514,20 +600,16 @@ async function loadGlobalBranches(selectEl) {
     toast(`Could not load branches (${e.message}).`);
   } finally {
     state.branchesLoading = false;
-    if (selectEl && selectEl.isConnected) populateGlobalBranch(selectEl);
+    if (globalBranchSS) globalBranchSS.ss.setLoading(false);
+    populateGlobalBranch();
   }
 }
 
-function populateGlobalBranch(selectEl) {
+function populateGlobalBranch() {
   const cur = state.branch || "dev";
   const list = (state.branches && state.branches.length) ? state.branches.slice() : ["dev"];
   if (!list.includes(cur)) list.unshift(cur); // keep current selection valid
-  selectEl.innerHTML = "";
-  list.forEach((b) => {
-    const o = document.createElement("option");
-    o.value = b; o.textContent = b; if (b === cur) o.selected = true;
-    selectEl.append(o);
-  });
+  if (globalBranchSS) { globalBranchSS.ss.setOptions(list); globalBranchSS.ss.setValue(cur); }
   state.branch = cur;
 }
 
@@ -535,14 +617,13 @@ function populateGlobalBranch(selectEl) {
 const ENV_OPTIONS = ["dev", "testing", "production"];
 
 function buildOverrideRow(name, job) {
-  // Build-branch override — "(global)" first, then this service's branches (lazy).
-  const branchSel = el("select", {
-    onchange: (e) => { job.branchOverride = e.target.value || null; }
+  // Build-branch override — searchable; "(global)" first, then this service's branches (lazy).
+  const branchSS = searchableSelect({
+    value: job.branchOverride || "",
+    onOpen: () => { if (!job.branchesLoaded && !job.branchesLoading) loadServiceBranches(name, branchSS); },
+    onChange: (v) => { job.branchOverride = v || null; },
   });
-  branchSel.addEventListener("focus", () => {
-    if (!job.branchesLoaded && !job.branchesLoading) loadServiceBranches(name, branchSel);
-  });
-  fillBranchOverride(branchSel, job);
+  fillBranchOverride(branchSS, job);
 
   // Release-env override — "(global)" + the three environments.
   const envSel = el("select", {
@@ -553,14 +634,14 @@ function buildOverrideRow(name, job) {
 
   // Branch drives both build and release, so it's relevant for every action.
   // Env is only irrelevant for build-only. Everything locks while a run is live.
-  branchSel.disabled = state.running;
+  branchSS.ss.setDisabled(state.running);
   envSel.disabled = state.running || state.action === "build";
 
   return el("div", { class: "row" },
-    el("div", {}, el("label", { class: "fld" }, "Build branch"), el("div", {}, branchSel)),
+    el("div", {}, el("label", { class: "fld" }, "Build branch"), el("div", {}, branchSS)),
     el("div", {}, el("label", { class: "fld" }, "Release env"), el("div", {}, envSel)),
     el("button", { class: "btn ghost", title: "Reload branches",
-      onclick: () => { job.branchesLoaded = false; loadServiceBranches(name, branchSel); } }, "↻"),
+      onclick: () => { job.branchesLoaded = false; loadServiceBranches(name, branchSS); } }, "↻"),
   );
 }
 
@@ -570,24 +651,21 @@ function optionEl(value, label, selected) {
   return o;
 }
 
-function fillBranchOverride(selectEl, job) {
+function fillBranchOverride(ss, job) {
   const cur = job.branchOverride || "";
-  selectEl.innerHTML = "";
-  selectEl.append(optionEl("", `(global: ${state.branch})`, !cur));
   const list = (job.branches && job.branches.length) ? job.branches : state.defaultBranches;
-  list.forEach((b) => selectEl.append(optionEl(b, b, cur === b)));
-  if (cur && !list.includes(cur)) selectEl.append(optionEl(cur, cur, true));
+  const opts = [{ value: "", label: `(global: ${state.branch})` }];
+  list.forEach((b) => opts.push({ value: b, label: b }));
+  if (cur && !list.includes(cur)) opts.push({ value: cur, label: cur });
+  ss.ss.setOptions(opts);
+  ss.ss.setValue(cur);
 }
 
-async function loadServiceBranches(name, selectEl) {
+async function loadServiceBranches(name, ss) {
   const job = state.selected.get(name);
   if (!job || job.branchesLoading) return;
   job.branchesLoading = true;
-  if (selectEl && selectEl.isConnected) {
-    const hint = document.createElement("option");
-    hint.disabled = true; hint.textContent = "Loading branches…";
-    selectEl.append(hint);
-  }
+  if (ss) ss.ss.setLoading(true);
   try {
     const res = await fetch(`/api/branches?service=${encodeURIComponent(name)}`);
     const data = await res.json();
@@ -599,7 +677,8 @@ async function loadServiceBranches(name, selectEl) {
     toast(`${name}: could not load branches (${e.message}).`);
   } finally {
     job.branchesLoading = false;
-    if (selectEl && selectEl.isConnected) fillBranchOverride(selectEl, job);
+    if (ss) ss.ss.setLoading(false);
+    if (ss) fillBranchOverride(ss, job);
   }
 }
 
@@ -676,7 +755,7 @@ function setRunningUI() {
   // lock the top controls while a run is in progress
   const lock = state.running;
   $("#action").disabled = lock;
-  $("#build-branch").disabled = lock; // branch drives both build and release
+  if (globalBranchSS) globalBranchSS.ss.setDisabled(lock); // branch drives both build and release
   $("#release-env").disabled = lock || state.action === "build";
   $("#clear").disabled = lock;
   // Parallel checkbox only applies to single-phase actions (build-only / release-only).
@@ -812,11 +891,14 @@ function applyRunSnapshot(run) {
 }
 
 // ---- wire up ----
-const buildBranchSel = $("#build-branch");
-buildBranchSel.addEventListener("focus", () => {
-  if (!state.branchesLoaded && !state.branchesLoading) loadGlobalBranches(buildBranchSel);
+globalBranchSS = searchableSelect({
+  value: state.branch || "dev",
+  onOpen: () => { if (!state.branchesLoaded && !state.branchesLoading) loadGlobalBranches(); },
+  onChange: (v) => { state.branch = v; renderSelected(); },
 });
-buildBranchSel.addEventListener("change", (e) => { state.branch = e.target.value; renderSelected(); });
+$("#build-branch").append(globalBranchSS);
+resetGlobalBranch();
+document.addEventListener("click", () => closeAllSS()); // close any open combobox on outside click
 $("#release-env").addEventListener("change", (e) => { state.environment = e.target.value; renderSelected(); });
 $("#action").addEventListener("change", (e) => { state.action = e.target.value; updateActionUI(); renderSelected(); });
 $("#parallel").addEventListener("change", (e) => { state.parallel = e.target.checked; updateFooter(); });
