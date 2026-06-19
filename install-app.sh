@@ -89,6 +89,24 @@ else
   ok "Azure CLI installed"
 fi
 
+# --- Azure DevOps extension ---
+# The app's commands (az pipelines / az repos) live in this extension, NOT in
+# core az. Install it explicitly — az's own dynamic auto-install via pip is
+# unreliable and is what produces the "Pip failed" error on first build.
+step "Checking Azure DevOps extension  ${c_dim}(instant if installed · ~10 s if not)${c_reset}"
+if az extension show --name azure-devops >/dev/null 2>&1; then
+  ok "azure-devops extension installed"
+else
+  warn "azure-devops extension not found. Running: az extension add --name azure-devops"
+  if ! az extension add --name azure-devops; then
+    warn "Could not install the azure-devops extension automatically."
+    info "Install it manually, then re-run this script:"
+    info "  az extension add --name azure-devops"
+    fail "The azure-devops extension is required (az pipelines / az repos)."
+  fi
+  ok "azure-devops extension installed"
+fi
+
 # --- source ---
 step "Fetching app source"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P 2>/dev/null || pwd)"
