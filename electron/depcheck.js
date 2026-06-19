@@ -26,6 +26,11 @@ const hasAz = () => run(["version", "-o", "json"], 20000);
 const hasDevopsExt = () => run(["extension", "show", "--name", "azure-devops"], 20000);
 const installDevopsExt = () => run(["extension", "add", "--name", "azure-devops"], 180000);
 
+// Auth helpers. `az login` opens the browser and blocks until the user finishes,
+// so give it a long timeout.
+const isLoggedIn = () => run(["account", "show"], 15000);
+const runAzLogin = () => run(["login"], 300000);
+
 async function ensureDependencies() {
   // 1. Azure CLI itself.
   if (!(await hasAz())) {
@@ -66,4 +71,4 @@ async function ensureDependencies() {
   return true;
 }
 
-module.exports = { ensureDependencies };
+module.exports = { ensureDependencies, isLoggedIn, runAzLogin };

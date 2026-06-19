@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Qwipo DevOps — Setup</title>
+<style>
+  :root { --bg:#0b0f17; --panel:#121826; --text:#e6edf3; --dim:#8b97a7; --accent:#4f8cff; --border:#243049; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  .card { width:100%; max-width:460px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  p.sub { margin:0 0 20px; color:var(--dim); font-size:13px; }
+  label { display:block; font-size:12px; color:var(--dim); margin:14px 0 6px; text-transform:uppercase; letter-spacing:.04em; }
+  input {
+    width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border);
+    background:var(--panel); color:var(--text); font-size:14px; outline:none;
+  }
+  input:focus { border-color:var(--accent); }
+  .err { color:#ff6b6b; font-size:12px; min-height:16px; margin-top:8px; }
+  button {
+    margin-top:18px; width:100%; padding:11px; border:0; border-radius:8px;
+    background:var(--accent); color:#fff; font-size:14px; font-weight:600; cursor:pointer;
+  }
+  button:disabled { opacity:.5; cursor:default; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Welcome to Qwipo DevOps</h1>
+    <p class="sub">Tell the app which Azure DevOps org and project to use. You can change these later.</p>
+
+    <label for="org">Azure DevOps Org URL</label>
+    <input id="org" type="text" placeholder="https://dev.azure.com/your-org/" />
+
+    <label for="project">Project</label>
+    <input id="project" type="text" placeholder="Your Project" />
+
+    <div class="err" id="err"></div>
+    <button id="save">Save &amp; Continue</button>
+  </div>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  const orgEl = document.getElementById("org");
+  const projEl = document.getElementById("project");
+  const errEl = document.getElementById("err");
+  const btn = document.getElementById("save");
+
+  orgEl.value = params.get("org") || "";
+  projEl.value = params.get("project") || "";
+
+  async function save() {
+    const org = orgEl.value.trim();
+    const project = projEl.value.trim();
+    if (!/^https?:\/\/.+/i.test(org)) { errEl.textContent = "Enter a valid org URL (https://…)"; orgEl.focus(); return; }
+    if (!project) { errEl.textContent = "Enter a project name."; projEl.focus(); return; }
+    errEl.textContent = "";
+    btn.disabled = true;
+    await window.qwipoSetup.save(org, project); // main process saves, then closes this window
+  }
+
+  btn.addEventListener("click", save);
+  projEl.addEventListener("keydown", (e) => { if (e.key === "Enter") save(); });
+  orgEl.addEventListener("keydown", (e) => { if (e.key === "Enter") projEl.focus(); });
+  orgEl.focus();
+</script>
+</body>
+</html>

@@ -9,12 +9,13 @@
  * so `az` / `brew` would be invisible to the server. fixPath() puts the usual
  * Homebrew + system locations back so the Azure CLI is found.
  */
-const { app, BrowserWindow, Menu, shell, dialog } = require("electron");
+const { app, BrowserWindow, Menu, shell, dialog, ipcMain } = require("electron");
 const path = require("path");
 const http = require("http");
 const { fork } = require("child_process");
 const { checkForUpdates } = require("./updater");
-const { ensureDependencies } = require("./depcheck");
+const { ensureDependencies, isLoggedIn, runAzLogin } = require("./depcheck");
+const { readOrgProject, saveOrgProject } = require("./config");
 
 const PORT = Number(process.env.QWIPO_WEB_PORT) || 4317;
 const APP_URL = `http://localhost:${PORT}`;
@@ -103,6 +104,46 @@ function createWindow() {
   });
 }
 
+/**
+ * First-run setup window: asks for the Azure DevOps org URL + project and saves
+ * them to config. Resolves true once saved, false if the user closed it without
+ * saving (in which case the app can't run, so we quit).
+ */
+function runSetupWindow(defaults) {
+  return new Promise((resolve) => {
+    const win = new BrowserWindow({
+      width: 520,
+      height: 440,
+      resizable: false,
+      title: "Qwipo DevOps — Setup",
+      backgroundColor: "#0b0f17",
+      webPreferences: {
+        contextIsolation: true,
+        preload: path.join(__dirname, "setup-preload.js"),
+      },
+    });
+
+    let saved = false;
+    ipcMain.handleOnce("setup:save", (_evt, { org, project }) => {
+      saveOrgProject(org, project);
+      saved = true;
+      win.close();
+      return true;
+    });
+
+    win.loadFile(path.join(__dirname, "setup.html"), {
+      search: new URLSearchParams({
+        org: defaults.org || "",
+        project: defaults.project || "",
+      }).toString(),
+    });
+    win.on("closed", () => {
+      ipcMain.removeHandler("setup:save");
+      resolve(saved);
+    });
+  });
+}
+
 function buildMenu() {
   const isMac = process.platform === "darwin";
   const template = [
@@ -127,6 +168,17 @@ function buildMenu() {
       label: "Help",
       submenu: [
         {
+          label: "Change Org & Project…",
+          click: async () => {
+            const saved = await runSetupWindow(readOrgProject());
+            // Relaunch so the server picks up the new org/project at startup.
+            if (saved) {
+              app.relaunch();
+              app.exit(0);
+            }
+          },
+        },
+        {
           label: "Check for Updates…",
           click: () => checkForUpdates({ silent: false }),
         },
@@ -149,6 +201,36 @@ app.whenReady().then(async () => {
   if (!(await ensureDependencies())) {
     app.quit();
     return;
+  }
+
+  // Sign-in: if not logged into Azure, offer to run `az login` (opens browser).
+  if (!(await isLoggedIn())) {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      message: "Sign in to Azure",
+      detail:
+        "Qwipo DevOps uses your Azure sign-in to talk to Azure DevOps. " +
+        "Signing in opens your browser.",
+      buttons: ["Sign In", "Continue Anyway", "Quit"],
+      defaultId: 0,
+      cancelId: 2,
+    });
+    if (response === 2) {
+      app.quit();
+      return;
+    }
+    if (response === 0) await runAzLogin();
+  }
+
+  // Org/project: if not configured yet, ask via the setup window before the
+  // server starts (the server reads these at launch).
+  const cfg = readOrgProject();
+  if (!cfg.org || !cfg.project) {
+    const done = await runSetupWindow(cfg);
+    if (!done) {
+      app.quit();
+      return;
+    }
   }
 
   startServer();
