@@ -14,6 +14,7 @@ const path = require("path");
 const http = require("http");
 const { fork } = require("child_process");
 const { checkForUpdates } = require("./updater");
+const { ensureDependencies } = require("./depcheck");
 
 const PORT = Number(process.env.QWIPO_WEB_PORT) || 4317;
 const APP_URL = `http://localhost:${PORT}`;
@@ -142,6 +143,14 @@ function buildMenu() {
 
 app.whenReady().then(async () => {
   fixPath();
+
+  // Make sure the Azure CLI + azure-devops extension are present before the UI
+  // is usable. If a required piece is missing and can't be set up, quit cleanly.
+  if (!(await ensureDependencies())) {
+    app.quit();
+    return;
+  }
+
   startServer();
   try {
     await waitForServer();
