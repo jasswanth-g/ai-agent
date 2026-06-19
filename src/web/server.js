@@ -31,7 +31,11 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 
 // Local credential/reference vault — a plaintext JSON file on this machine,
 // gitignored. Stores tokens, test/dev creds, app mobile numbers, etc.
-const CREDENTIALS_FILE = path.join(__dirname, "credentials.json");
+// When packaged as a desktop app the bundle is read-only, so the Electron shell
+// passes QWIPO_DATA_DIR (its writable userData folder). For `npm run web` / CLI
+// use it falls back to this directory, exactly as before.
+const DATA_DIR = process.env.QWIPO_DATA_DIR || __dirname;
+const CREDENTIALS_FILE = path.join(DATA_DIR, "credentials.json");
 function readCredentials() {
   try {
     return JSON.parse(fs.readFileSync(CREDENTIALS_FILE, "utf8"));
@@ -40,6 +44,7 @@ function readCredentials() {
   }
 }
 function writeCredentials(data) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
 }
 

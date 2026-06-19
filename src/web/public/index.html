@@ -471,7 +471,7 @@ function toggleSound() {
 }
 
 // ---- failure sound (custom mp3) ----
-const _errorAudio = new Audio("/sounds/faaah.mp3");
+const _errorAudio = new Audio("/sounds/error.mp3");
 function playError() {
   if (!soundOn) return;
   try { _errorAudio.currentTime = 0; _errorAudio.play().catch(() => {}); } catch {}
