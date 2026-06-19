@@ -2,6 +2,7 @@
   "name": "@qwipo/aiagent",
   "version": "1.0.0",
   "description": "Azure DevOps CI/CD automation agent - CLI tool",
+  "author": "Qwipo",
   "main": "electron/main.js",
   "bin": {
     "qwipo": "./index.js"
@@ -42,8 +43,18 @@
       "package.json"
     ],
     "mac": {
-      "target": "dmg",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": "universal"
+        }
+      ],
       "category": "public.app-category.developer-tools"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "jasswanth-g",
+      "repo": "ai-agent"
     }
   }
 }

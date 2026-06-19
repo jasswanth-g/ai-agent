@@ -13,6 +13,7 @@ const { app, BrowserWindow, Menu, shell, dialog } = require("electron");
 const path = require("path");
 const http = require("http");
 const { fork } = require("child_process");
+const { checkForUpdates } = require("./updater");
 
 const PORT = Number(process.env.QWIPO_WEB_PORT) || 4317;
 const APP_URL = `http://localhost:${PORT}`;
@@ -125,6 +126,11 @@ function buildMenu() {
       label: "Help",
       submenu: [
         {
+          label: "Check for Updates…",
+          click: () => checkForUpdates({ silent: false }),
+        },
+        { type: "separator" },
+        {
           label: "Open in Browser",
           click: () => shell.openExternal(APP_URL),
         },
@@ -149,6 +155,12 @@ app.whenReady().then(async () => {
   }
   buildMenu();
   createWindow();
+
+  // Quietly check GitHub Releases shortly after launch; only speaks up if there's
+  // a newer version. Skipped in dev (unpackaged) since the version is just dev.
+  if (app.isPackaged) {
+    setTimeout(() => checkForUpdates({ silent: true }), 4000);
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
