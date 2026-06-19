@@ -143,10 +143,50 @@ cp -R "$built_app" "$dest"
 xattr -dr com.apple.quarantine "$dest" 2>/dev/null || true
 ok "Installed: $dest"
 
+# --- Azure sign-in ---
+step "Azure sign-in"
+if az account show >/dev/null 2>&1; then
+  ok "Already signed in to Azure"
+else
+  read -r -p "  Sign in to Azure now (opens a browser)? [Y/n] " a || a=""
+  case "${a:-Y}" in
+    [Nn]*) warn "Skipped — run 'az login' before using the app." ;;
+    *) az login || warn "az login failed — you can run it later with 'az login'." ;;
+  esac
+fi
+
+# --- org / project ---
+# The app reads these from its config file (GUI apps don't see shell env vars).
+# We MERGE into any existing file so other keys aren't clobbered.
+step "Configure your Azure DevOps org & project"
+CONFIG_FILE="$HOME/.config/configstore/aiagent.json"
+
+# Pre-fill defaults from an existing config if present, else sensible team values.
+cur_org="$(node -e 'try{process.stdout.write((JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).azureDevOpsOrg)||"")}catch{}' "$CONFIG_FILE" 2>/dev/null)"
+cur_proj="$(node -e 'try{process.stdout.write((JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).azureDevOpsProject)||"")}catch{}' "$CONFIG_FILE" 2>/dev/null)"
+default_org="${cur_org:-https://dev.azure.com/xavica/}"
+default_project="${cur_proj:-Qwipo B2B}"
+
+read -r -p "  Azure DevOps Org URL [$default_org]: " in_org || in_org=""
+org="${in_org:-$default_org}"
+read -r -p "  Azure DevOps Project [$default_project]: " in_proj || in_proj=""
+project="${in_proj:-$default_project}"
+
+node -e '
+  const fs = require("fs"); const path = require("path");
+  const file = process.argv[1];
+  let obj = {};
+  try { obj = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+  obj.azureDevOpsOrg = process.argv[2];
+  obj.azureDevOpsProject = process.argv[3];
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(obj, null, 2));
+' "$CONFIG_FILE" "$org" "$project"
+ok "Saved: org=$org  project=$project"
+
 echo ""
 echo -e "${c_bold}${c_green}Done.${c_reset}"
 echo -e "Open ${c_bold}Qwipo DevOps${c_reset} from Launchpad or your Applications folder."
-echo -e "${c_dim}First launch will ask you to sign in to Azure (az login) and pick your org/project.${c_reset}"
 echo ""
 
 # Offer to open it now (skip silently if not interactive).
