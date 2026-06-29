@@ -19,7 +19,6 @@ set -euo pipefail
 
 REPO_URL="${QWIPO_REPO_URL:-https://github.com/jasswanth-g/ai-agent.git}"
 INSTALL_DIR="${QWIPO_INSTALL_DIR:-$HOME/.qwipo-agent}"
-RECOMMENDED_MODEL="qwen2.5:7b"
 
 c_red="\033[0;31m"
 c_green="\033[0;32m"
@@ -51,10 +50,9 @@ echo -e "${c_bold}${c_blue}│${c_reset}  ${c_bold}Qwipo DevOps Agent — instal
 echo -e "${c_bold}${c_blue}│${c_reset}                                                            ${c_bold}${c_blue}│${c_reset}"
 echo -e "${c_bold}${c_blue}│${c_reset}  Will install (if missing):                                ${c_bold}${c_blue}│${c_reset}"
 echo -e "${c_bold}${c_blue}│${c_reset}    • Homebrew       • Node.js        • Azure CLI          ${c_bold}${c_blue}│${c_reset}"
-echo -e "${c_bold}${c_blue}│${c_reset}    • Ollama         • qwen2.5:7b model (~5 GB)            ${c_bold}${c_blue}│${c_reset}"
 echo -e "${c_bold}${c_blue}│${c_reset}    • this repo      → ~/.qwipo-agent                      ${c_bold}${c_blue}│${c_reset}"
 echo -e "${c_bold}${c_blue}│${c_reset}                                                            ${c_bold}${c_blue}│${c_reset}"
-echo -e "${c_bold}${c_blue}│${c_reset}  ${c_dim}Expected time: 15–25 min on a fresh Mac,${c_reset}                 ${c_bold}${c_blue}│${c_reset}"
+echo -e "${c_bold}${c_blue}│${c_reset}  ${c_dim}Expected time: 5–8 min on a fresh Mac,${c_reset}                   ${c_bold}${c_blue}│${c_reset}"
 echo -e "${c_bold}${c_blue}│${c_reset}  ${c_dim}1–2 min if you already have Homebrew + Node.${c_reset}             ${c_bold}${c_blue}│${c_reset}"
 echo -e "${c_bold}${c_blue}│${c_reset}  ${c_dim}Sudo password may be required once (for Homebrew).${c_reset}       ${c_bold}${c_blue}│${c_reset}"
 echo -e "${c_bold}${c_blue}└────────────────────────────────────────────────────────────┘${c_reset}"
@@ -91,38 +89,6 @@ else
   ok "Azure CLI installed"
 fi
 
-# --- Ollama ---
-step "Checking Ollama  ${c_dim}(instant if installed · ~30 s via brew if not)${c_reset}"
-if ! command -v ollama >/dev/null 2>&1; then
-  warn "Ollama not found. Running: brew install ollama"
-  brew install ollama
-  info "Starting Ollama service in the background…"
-  brew services start ollama || true
-  sleep 3
-else
-  ok "Ollama installed"
-  if ! curl -sf http://localhost:11434/api/tags >/dev/null 2>&1; then
-    info "Ollama daemon isn't running — starting it with 'brew services start ollama'…"
-    brew services start ollama || true
-    sleep 3
-  else
-    info "Ollama daemon is already running"
-  fi
-fi
-
-# --- at least one model ---
-step "Ensuring an Ollama model is available  ${c_dim}(instant if you have one · ~5–10 min to pull qwen2.5:7b if not)${c_reset}"
-existing_models=$(ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -v '^$' || true)
-if [[ -n "$existing_models" ]]; then
-  ok "Models already installed:"
-  echo "$existing_models" | sed 's/^/      - /'
-  info "You'll pick which one to use during 'qwipo --setup'."
-else
-  warn "No models installed. Pulling ${c_bold}${RECOMMENDED_MODEL}${c_reset} (~5 GB)."
-  info "Ollama will show a progress bar below — watch the MB counter tick up so you know it's working."
-  ollama pull "$RECOMMENDED_MODEL"
-fi
-
 # --- source ---
 step "Fetching qwipo agent source"
 # If we're already inside a clone of this repo, reuse it. Otherwise clone fresh.
@@ -155,6 +121,6 @@ fi
 
 echo ""
 echo -e "${c_bold}${c_green}Installed.${c_reset}"
-echo -e "Next: run ${c_bold}qwipo --setup${c_reset} to pick your Azure DevOps org and Ollama model."
-echo -e "Then just type ${c_bold}qwipo${c_reset} anywhere to start the agent."
+echo -e "Next: run ${c_bold}qwipo --setup${c_reset} to configure your Azure DevOps org and project."
+echo -e "Then run ${c_bold}qwipo${c_reset} to see the available commands."
 echo ""

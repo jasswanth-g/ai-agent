@@ -1,6 +1,6 @@
-# Qwipo DevOps Agent
+# Qwipo DevOps
 
-A local, CLI-driven DevOps assistant for Qwipo's Azure DevOps. Ask it in plain English — it triggers builds/releases, lists work items, checks pipeline status, and more. All running on your laptop via Ollama (nothing leaves your machine except your Azure CLI calls).
+A local, CLI-driven DevOps tool for Qwipo's Azure DevOps. Trigger builds/releases, list recent builds, and check pipeline status — straight from your terminal or the built-in Build & Release web UI. Nothing leaves your machine except your Azure CLI calls.
 
 ## Install (macOS)
 
@@ -18,12 +18,11 @@ curl -fL -o /tmp/qwipo-install.sh https://raw.githubusercontent.com/jasswanth-g/
 
 That's it. The installer takes care of everything:
 
-- Homebrew, Node.js, Azure CLI, Ollama (skips anything you already have)
-- `qwen2.5:7b` model (~5 GB, skipped if you have any model installed)
-- Clones the agent into `~/.qwipo-agent`
+- Homebrew, Node.js, Azure CLI (skips anything you already have)
+- Clones the repo into `~/.qwipo-agent`
 - Puts the `qwipo` command on your `$PATH`
 
-**Expected time:** 15–25 min on a fresh Mac, 1–2 min if you already have Homebrew + Node. Sudo password is asked once (for Homebrew).
+**Expected time:** 5–8 min on a fresh Mac, 1–2 min if you already have Homebrew + Node. Sudo password is asked once (for Homebrew).
 
 ## First run
 
@@ -31,34 +30,21 @@ That's it. The installer takes care of everything:
 qwipo --setup
 ```
 
-Prompts for your Azure DevOps org URL, project name, and which Ollama model to use (picks from what you have installed, with `qwen2.5:7b` marked *recommended*). Also runs `az login` if you're not already logged in.
+Prompts for your Azure DevOps org URL and project name. Also runs `az login` if you're not already logged in.
 
-Then:
-
-```bash
-qwipo
-```
-
-Launches the interactive agent. Type questions or commands in plain English.
-
-## Example prompts
-
-```
-what are my work items?
-latest build for partner-portal
-build and release core-service from dev to dev
-build and release pre-order-service, cache-service, core-service from dev to dev
-```
-
-## Agent-to-agent usage
-
-Claude Code or any other automation can invoke the agent headlessly:
+## Commands
 
 ```bash
-qwipo --prompt "build and release core-service from dev to dev"
+qwipo builds <service>            # list recent builds for a service
+qwipo releases <service>          # list recent releases for a service
+qwipo status <build-id>           # check the status of a build
+qwipo trigger <service> <branch>  # trigger a build for a service on a branch
+qwipo services                    # list all configured services
+qwipo --web                       # launch the Build & Release web UI (http://localhost:4317)
+qwipo --setup                     # reconfigure org/project
 ```
 
-Returns the result on stdout; write-confirmations are auto-accepted in this mode.
+Running `qwipo` with no arguments prints this command list.
 
 ## Update
 
@@ -73,12 +59,10 @@ npm -g uninstall @qwipo/aiagent
 rm -rf ~/.qwipo-agent ~/.config/configstore/aiagent.json
 ```
 
-Homebrew-installed tools (Node, Azure CLI, Ollama) stay put unless you `brew uninstall` them separately.
+Homebrew-installed tools (Node, Azure CLI) stay put unless you `brew uninstall` them separately.
 
 ## Troubleshooting
 
 **`qwipo: command not found`** — open a new terminal, or run `source ~/.zshrc`. If it still doesn't resolve, `npm root -g` shows where the symlink lives; that directory needs to be on your `$PATH`.
-
-**Setup asks for a model but none show up** — check the Ollama daemon: `brew services list | grep ollama`. If it's `stopped`, run `brew services start ollama` and re-run `qwipo --setup`.
 
 **Azure calls fail with auth errors** — run `az login` and retry.

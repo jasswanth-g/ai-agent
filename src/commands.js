@@ -103,16 +103,17 @@ async function runCommand(command, args) {
     }
 
     default:
-      console.log(chalk.red(`  Unknown command: ${command}`));
+      if (command !== "help") {
+        console.log(chalk.red(`  Unknown command: ${command}`));
+      }
       console.log("");
       console.log(chalk.cyan("  Available commands:"));
-      console.log(chalk.white("    qwipo                         ") + chalk.gray("— Interactive mode"));
       console.log(chalk.white("    qwipo builds <service>        ") + chalk.gray("— List recent builds"));
       console.log(chalk.white("    qwipo releases <service>      ") + chalk.gray("— List recent releases"));
       console.log(chalk.white("    qwipo status <build-id>       ") + chalk.gray("— Check build status"));
       console.log(chalk.white("    qwipo trigger <service> <branch>") + chalk.gray(" — Trigger a build"));
       console.log(chalk.white("    qwipo services                ") + chalk.gray("— List all services"));
-      console.log(chalk.white("    qwipo --prompt \"<message>\"    ") + chalk.gray("— Headless mode (for agent-to-agent)"));
+      console.log(chalk.white("    qwipo --web                   ") + chalk.gray("— Launch the Build & Release web UI"));
       console.log(chalk.white("    qwipo --setup                 ") + chalk.gray("— Reconfigure"));
       console.log("");
   }

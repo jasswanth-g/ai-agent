@@ -2,12 +2,10 @@
 
 // --- Auto-update: once per 24h, fetch latest code from GitHub so users always
 // run the freshest version without a manual `git pull`. Opt out with the env
-// var QWIPO_NO_UPDATE=1 or the flag --no-update. Skipped in --prompt (headless)
-// mode so agent-to-agent callers don't inherit update latency.
+// var QWIPO_NO_UPDATE=1 or the flag --no-update.
 (function autoUpdate() {
   if (process.env.QWIPO_NO_UPDATE === "1") return;
   if (process.argv.includes("--no-update")) return;
-  if (process.argv.includes("--prompt")) return;
 
   const path = require("path");
   const fs = require("fs");
@@ -51,10 +49,7 @@
 })();
 
 const { isConfigured, runSetup } = require("./src/setup");
-const { startAgent } = require("./src/core/agent");
 const { runCommand } = require("./src/commands");
-
-const DIRECT_COMMANDS = ["builds", "releases", "status", "trigger", "services"];
 
 async function main() {
   const args = process.argv.slice(2);
@@ -75,44 +70,14 @@ async function main() {
     return;
   }
 
-  // Headless mode: qwipo --prompt "give build for partner-portal from dev"
-  const promptIdx = args.indexOf("--prompt");
-  if (promptIdx !== -1) {
-    const prompt = args.slice(promptIdx + 1).join(" ");
-    if (!prompt) {
-      console.error("Error: --prompt requires a message");
-      process.exit(1);
-    }
-    const { runHeadless } = require("./src/core/headless");
-    try {
-      const result = await runHeadless(prompt);
-      console.log(result);
-    } catch (err) {
-      console.error(`Error: ${err.message}`);
-      process.exit(1);
-    }
-    return;
-  }
-
   // Direct command mode: qwipo builds core-service
-  if (args.length > 0 && DIRECT_COMMANDS.includes(args[0])) {
-    try {
-      await runCommand(args[0], args.slice(1));
-    } catch (err) {
-      console.error(`Error: ${err.message}`);
-      process.exit(1);
-    }
-    return;
+  // Anything else (including no args) falls through to runCommand, which prints usage.
+  try {
+    await runCommand(args[0] || "help", args.slice(1));
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
   }
-
-  // Unknown command — show help
-  if (args.length > 0) {
-    await runCommand(args[0], args.slice(1));
-    return;
-  }
-
-  // Interactive mode
-  await startAgent();
 }
 
 main().catch(console.error);

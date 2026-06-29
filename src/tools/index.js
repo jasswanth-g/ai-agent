@@ -25,28 +25,6 @@ function loadTools() {
   return tools;
 }
 
-function getToolDescriptions(tools) {
-  return Object.fromEntries(
-    Object.entries(tools).map(([name, t]) => [name, t.description])
-  );
-}
-
-/**
- * Convert tools to Claude API tool format.
- * Each tool gets a name, description, and input_schema.
- */
-function getClaudeTools(tools) {
-  return Object.entries(tools).map(([name, t]) => ({
-    name,
-    description: t.description,
-    input_schema: t.input_schema || {
-      type: "object",
-      properties: {},
-      required: [],
-    },
-  }));
-}
-
 async function runTool(tools, name, args) {
   if (!tools[name]) return `Unknown tool: ${name}`;
   try {
@@ -56,4 +34,4 @@ async function runTool(tools, name, args) {
   }
 }
 
-module.exports = { loadTools, getToolDescriptions, getClaudeTools, runTool };
+module.exports = { loadTools, runTool };
