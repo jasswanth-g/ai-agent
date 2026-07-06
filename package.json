@@ -1,29 +1,21 @@
 {
   "name": "@qwipo/aiagent",
   "version": "1.0.0",
-  "description": "Azure DevOps CI/CD CLI tool",
+  "description": "Azure DevOps Build & Release web app for Qwipo",
   "author": "Qwipo",
   "main": "electron/main.js",
-  "bin": {
-    "qwipo": "./index.js"
-  },
   "scripts": {
-    "setup": "node index.js --setup",
     "web": "node src/web/server.js",
     "app": "electron electron/main.js",
     "dist": "electron-builder --mac"
   },
   "keywords": [
     "azure-devops",
-    "cli",
     "ci-cd"
   ],
   "license": "PRIVATE",
   "dependencies": {
-    "chalk": "^4.1.2",
-    "configstore": "^5.0.1",
-    "inquirer": "^8.2.6",
-    "ora": "^5.4.1"
+    "configstore": "^5.0.1"
   },
   "devDependencies": {
     "electron": "^31.7.7",
@@ -34,7 +26,6 @@
     "productName": "Qwipo DevOps",
     "files": [
       "electron/**/*",
-      "index.js",
       "src/**/*",
       "!src/web/credentials.json",
       "package.json"
