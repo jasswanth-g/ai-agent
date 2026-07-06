@@ -21,6 +21,40 @@
   }
   header h1 { font-size: 16px; margin: 0; font-weight: 600; }
   header .sub { color: var(--muted); font-size: 12px; }
+  /* Business name — looks like a heading, opens the workspace popup on click */
+  .biz-trigger {
+    display: flex; align-items: center; gap: 6px;
+    background: none; border: none; margin: 0; padding: 2px 6px 2px 4px;
+    color: var(--text); font-size: 16px; font-weight: 600; line-height: 1.4;
+    cursor: pointer; border-radius: 6px;
+  }
+  .biz-trigger:hover { background: var(--panel-2); }
+  .biz-caret { color: var(--muted); flex: none; }
+  /* Workspace settings modal */
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.55);
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .modal-overlay[hidden] { display: none; }
+  .modal {
+    width: 100%; max-width: 420px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 12px; padding: 20px;
+    box-shadow: 0 16px 48px rgba(0,0,0,.5);
+  }
+  .modal h3 { margin: 0 0 14px; font-size: 16px; }
+  .modal-label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
+  .modal-input {
+    width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--text); font-size: 13px; outline: none;
+  }
+  .modal-input:focus { border-color: var(--accent); }
+  .modal-row { display: flex; gap: 8px; align-items: stretch; }
+  .modal-row .modal-input { flex: 1; }
+  .modal-err { color: var(--err); font-size: 12px; min-height: 16px; margin-top: 8px; }
+  .modal-hint { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
+  .modal-hint a { color: var(--accent); text-decoration: none; }
+  .modal-hint a:hover { text-decoration: underline; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
   /* Sound toggle — minimal dark bell icon button */
   .sound-toggle {
     margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
@@ -243,7 +277,10 @@
 </head>
 <body>
 <header>
-  <h1>Qwipo</h1>
+  <button type="button" class="biz-trigger" id="biz-trigger" aria-haspopup="dialog" title="Workspace settings">
+    <span class="biz-name" id="biz-name">…</span>
+    <svg class="biz-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
   <nav class="tabs">
     <button class="tab active" data-view="deploy">Build &amp; Release</button>
     <button class="tab" data-view="ondc">ONDC Search</button>
@@ -257,6 +294,31 @@
     </svg>
   </button>
 </header>
+
+<!-- Workspace settings popup: change the Azure DevOps org + business -->
+<div id="settings-overlay" class="modal-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <h3 id="settings-title">Workspace</h3>
+    <label class="modal-label" for="settings-org">Azure DevOps Org URL</label>
+    <input id="settings-org" class="modal-input" type="text" placeholder="https://dev.azure.com/your-org/" autocomplete="off" spellcheck="false" />
+    <label class="modal-label" for="settings-services-url">Services JSON URL</label>
+    <input id="settings-services-url" class="modal-input" type="text" placeholder="https://…/services.json" autocomplete="off" spellcheck="false" />
+    <div class="modal-hint">
+      A JSON object keyed by business name → its services. This is where the service list comes from — without it, no services are listed.
+      <a href="/services.example.json" download="services.example.json">Download example</a>
+    </div>
+    <label class="modal-label" for="settings-business">Business</label>
+    <div class="modal-row">
+      <select id="settings-business" class="modal-input"></select>
+      <button id="settings-load" class="btn ghost" type="button" title="List businesses for this org">Load</button>
+    </div>
+    <div id="settings-err" class="modal-err"></div>
+    <div class="modal-actions">
+      <button id="settings-cancel" class="btn ghost" type="button">Cancel</button>
+      <button id="settings-save" class="btn" type="button">Save</button>
+    </div>
+  </div>
+</div>
 
 <div id="view-deploy" class="view">
 <div class="layout">
@@ -502,13 +564,122 @@ function playChime(success) {
   } catch {}
 }
 
-// ---- load services + reattach to an in-progress run ----
-async function init() {
-  const res = await fetch("/api/services");
+// ---- workspace (org + business): heading shows the business, click opens a popup ----
+let bizActiveOrg = "";        // active Azure DevOps org URL
+let bizActive = "";           // active business (project)
+let bizActiveServicesUrl = ""; // active services.json URL ("" = folder discovery)
+
+// Fetch the businesses for an org (or the active org when omitted).
+async function fetchProjects(org) {
+  const q = org ? ("?org=" + encodeURIComponent(org)) : "";
+  const res = await fetch("/api/projects" + q);
+  return res.json(); // { projects, org, activeOrg, activeProject, error? }
+}
+
+async function loadProjects() {
+  try {
+    const data = await fetchProjects();
+    bizActiveOrg = data.activeOrg || "";
+    bizActive = data.activeProject || (data.projects[0] && data.projects[0].name) || "";
+    bizActiveServicesUrl = data.activeServicesUrl || "";
+    if (data.error) toast(`Couldn't list businesses: ${data.error}`);
+  } catch (e) {
+    /* keep whatever we have */
+  }
+  $("#biz-name").textContent = bizActive || "—";
+}
+
+// ---- settings popup ----
+function openSettings() {
+  $("#settings-err").textContent = "";
+  $("#settings-org").value = bizActiveOrg || "";
+  $("#settings-services-url").value = bizActiveServicesUrl || "";
+  $("#settings-overlay").hidden = false;
+  loadBusinessesIntoModal(bizActiveOrg, bizActive);
+}
+function closeSettings() { $("#settings-overlay").hidden = true; }
+
+// Populate the modal's business dropdown for a given org, preselecting `want`.
+async function loadBusinessesIntoModal(org, want) {
+  const sel = $("#settings-business");
+  sel.innerHTML = "";
+  sel.append(el("option", { value: "" }, "Loading…"));
+  try {
+    const data = await fetchProjects(org);
+    const names = (data.projects || []).map((p) => p.name);
+    sel.innerHTML = "";
+    if (!names.length) {
+      sel.append(el("option", { value: "" }, "No businesses found"));
+      $("#settings-err").textContent = data.error || "";
+      return;
+    }
+    const target = want || data.activeProject;
+    names.forEach((n) => sel.append(el("option", { value: n }, n)));
+    if (target && names.includes(target)) sel.value = target;
+    $("#settings-err").textContent = "";
+  } catch (e) {
+    sel.innerHTML = "";
+    sel.append(el("option", { value: "" }, "—"));
+    $("#settings-err").textContent = "Could not load businesses: " + e.message;
+  }
+}
+
+// Persist the chosen org + business, then reload services/branches for it.
+async function saveSettings() {
+  const org = $("#settings-org").value.trim();
+  const project = $("#settings-business").value;
+  const servicesUrl = $("#settings-services-url").value.trim();
+  const errEl = $("#settings-err");
+  errEl.textContent = "";
+  if (!/^https?:\/\/.+/i.test(org)) { errEl.textContent = "Enter a valid org URL (https://…)."; return; }
+  if (!project) { errEl.textContent = "Pick a business."; return; }
+  if (servicesUrl && !/^https?:\/\//i.test(servicesUrl)) { errEl.textContent = "Services JSON URL must start with http:// or https://"; return; }
+
+  const btn = $("#settings-save");
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/project", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ org, project, servicesUrl }),
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || "Could not save."; return; }
+    bizActiveOrg = data.activeOrg || org;
+    bizActive = data.activeProject || project;
+    bizActiveServicesUrl = data.activeServicesUrl || "";
+    $("#biz-name").textContent = bizActive || "—";
+    closeSettings();
+    // Workspace changed → prior selection and branch union are stale. Reset and reload.
+    state.selected.clear();
+    resetGlobalBranch();
+    await reloadServices(true);
+    renderSelected();
+    updateFooter();
+    toast(`Switched to ${bizActive}`);
+  } catch (e) {
+    errEl.textContent = "Could not save: " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function reloadServices(force = false) {
+  const res = await fetch("/api/services" + (force ? "?refresh=1" : ""));
   const data = await res.json();
-  state.services = data.services;
+  state.services = data.services || [];
   state.defaultBranches = data.defaultBranches || state.defaultBranches;
   renderServiceList();
+  if (data.error) toast(data.error);
+  if (data.warnings && data.warnings.length) {
+    console.warn("Service discovery warnings:", data.warnings);
+  }
+}
+
+// ---- load business + services, then reattach to an in-progress run ----
+async function init() {
+  await loadProjects();
+  await reloadServices();
 
   // If a run is still going (e.g. the page was refreshed), reattach and resume.
   try {
@@ -1165,6 +1336,12 @@ function switchView(view) {
   if (view === "creds" && !_credsInit) { _credsInit = true; loadCreds(); }
 }
 document.querySelectorAll(".tabs .tab").forEach((t) => t.addEventListener("click", () => switchView(t.dataset.view)));
+$("#biz-trigger").addEventListener("click", openSettings);
+$("#settings-load").addEventListener("click", () => loadBusinessesIntoModal($("#settings-org").value.trim()));
+$("#settings-save").addEventListener("click", saveSettings);
+$("#settings-cancel").addEventListener("click", closeSettings);
+$("#settings-overlay").addEventListener("click", (e) => { if (e.target === $("#settings-overlay")) closeSettings(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#settings-overlay").hidden) closeSettings(); });
 
 init();
 </script>

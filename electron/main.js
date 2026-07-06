@@ -113,7 +113,7 @@ function runSetupWindow(defaults) {
   return new Promise((resolve) => {
     const win = new BrowserWindow({
       width: 520,
-      height: 440,
+      height: 560,
       resizable: false,
       title: "Qwipo DevOps — Setup",
       backgroundColor: "#0b0f17",
@@ -124,8 +124,8 @@ function runSetupWindow(defaults) {
     });
 
     let saved = false;
-    ipcMain.handleOnce("setup:save", (_evt, { org, project }) => {
-      saveOrgProject(org, project);
+    ipcMain.handleOnce("setup:save", (_evt, { org, project, servicesUrl }) => {
+      saveOrgProject(org, project, servicesUrl);
       saved = true;
       win.close();
       return true;
@@ -135,6 +135,7 @@ function runSetupWindow(defaults) {
       search: new URLSearchParams({
         org: defaults.org || "",
         project: defaults.project || "",
+        servicesUrl: defaults.servicesUrl || "",
       }).toString(),
     });
     win.on("closed", () => {

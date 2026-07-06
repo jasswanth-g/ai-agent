@@ -1,0 +1,21 @@
+{
+  "Business A": [
+    {
+      "name": "core-service",
+      "buildPipelineId": 132,
+      "releasePipelineId": 162
+    },
+    {
+      "name": "order-service",
+      "buildPipelineId": 143,
+      "releasePipelineId": 171
+    }
+  ],
+  "Business B": [
+    {
+      "name": "partner-portal",
+      "buildPipelineId": 192,
+      "releasePipelineId": 193
+    }
+  ]
+}

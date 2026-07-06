@@ -26,15 +26,15 @@ The app shells out to the **Azure CLI** (`az`), which must be installed, logged 
 
 Two tiers: the Electron window forks a local Node server (the backend), which serves the browser UI (the frontend) and shells out to `az`.
 
-**Backend / Web server** (`src/web/server.js`) is a zero-dependency Node `http` server (no Express) serving `public/index.html` plus a small JSON/NDJSON-streaming API for Build & Release. It shells out through `execAzCli` in `src/utils/shell.js` (a promisified `execFile` wrapper with timeout + debug logging). It discovers services dynamically via `az pipelines list` (see `getServices()`), falling back to the static `serviceAliases.js` map. It also has a local plaintext credentials vault (`credentials.json`, gitignored) read from `QWIPO_DATA_DIR` or its own dir.
+**Backend / Web server** (`src/web/server.js`) is a zero-dependency Node `http` server (no Express) serving `public/index.html` plus a small JSON/NDJSON-streaming API for Build & Release. It shells out through `execAzCli` in `src/utils/shell.js` (a promisified `execFile` wrapper with timeout + debug logging). It also has a local plaintext credentials vault (`credentials.json`, gitignored) read from `QWIPO_DATA_DIR` or its own dir.
 
-**Service aliases** (`src/config/serviceAliases.js`) is a static map of service names → `{ buildPipelineId, releasePipelineId }`, used as the fallback when live pipeline discovery fails.
+**Services source of truth** is a hosted **`services.json` URL** (config key `servicesUrl`, set in Workspace settings / first-run setup). It's a JSON object keyed by business (project) name → an array of `{ name, buildPipelineId, releasePipelineId }`. `getServices()` fetches it (`fetchJson`, follows redirects, classifies offline/HTTP/parse errors), picks `json[activeProject]`, and caches per `(org, project, url)`. There is **no** folder-discovery or static fallback — no URL means no services (the API returns a clear `error`, which the UI toasts). `public/services.example.json` is the downloadable template linked in both setup surfaces.
 
-**Config** (`src/config/index.js`) reads `AZURE_DEVOPS_ORG` / `AZURE_DEVOPS_PROJECT` **once at module load** via `getConfig` (`src/setup.js`), so changing config requires a restart.
+**Config** (`src/config/index.js`) reads `AZURE_DEVOPS_ORG` / `AZURE_DEVOPS_PROJECT` / `AZURE_DEVOPS_SERVICES_URL` **once at module load** via `getConfig` (`src/setup.js`). The server also holds mutable `activeOrg` / `activeProject` / `activeServicesUrl` that `POST /api/project` updates and persists at runtime (no restart needed for a workspace switch); the module-load config is just the seed.
 
 **Electron** (`electron/`) does not reimplement anything — `main.js` forks `src/web/server.js` as a child process (with `ELECTRON_RUN_AS_NODE=1`) and shows it in a native window. It handles macOS GUI PATH loss (`fixPath`), first-run dependency/login gating (`depcheck.js`), org/project setup (`config.js`, `setup.html`), and GitHub-release auto-update (`updater.js`).
 
 ## Conventions & gotchas
 
-- Config values in `src/config/index.js` are read once at module load, so changing config requires a restart.
+- `src/config/index.js` reads config once at module load (the seed). The web server then tracks `activeOrg`/`activeProject`/`activeServicesUrl` in memory and updates them live via `POST /api/project`, so a workspace switch needs no restart — but code that imports the `AZURE_DEVOPS_*` constants directly sees only the load-time values.
 - Safety rules enforced in code: builds/releases from `main`/`master` are rejected; prod/staging deploys are blocked.

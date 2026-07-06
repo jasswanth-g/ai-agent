@@ -5,6 +5,7 @@ const config = new Configstore("aiagent");
 const CONFIG_KEYS = {
   AZURE_DEVOPS_ORG: "azureDevOpsOrg",
   AZURE_DEVOPS_PROJECT: "azureDevOpsProject",
+  SERVICES_URL: "servicesUrl",
 };
 
 function getConfig(key) {

@@ -22,6 +22,9 @@
   }
   input:focus { border-color:var(--accent); }
   .err { color:#ff6b6b; font-size:12px; min-height:16px; margin-top:8px; }
+  .hint { font-size:11px; color:var(--dim); margin-top:6px; line-height:1.5; }
+  .hint a { color:var(--accent); text-decoration:none; }
+  .hint a:hover { text-decoration:underline; }
   button {
     margin-top:18px; width:100%; padding:11px; border:0; border-radius:8px;
     background:var(--accent); color:#fff; font-size:14px; font-weight:600; cursor:pointer;
@@ -40,6 +43,13 @@
     <label for="project">Project</label>
     <input id="project" type="text" placeholder="Your Project" />
 
+    <label for="servicesUrl">Services JSON URL</label>
+    <input id="servicesUrl" type="text" placeholder="https://…/services.json" />
+    <div class="hint">
+      A JSON object keyed by project name → its services. This is where the service list comes from — without it, no services are listed.
+      <a id="example-link" download="services.example.json">Download example</a>
+    </div>
+
     <div class="err" id="err"></div>
     <button id="save">Save &amp; Continue</button>
   </div>
@@ -48,24 +58,43 @@
   const params = new URLSearchParams(location.search);
   const orgEl = document.getElementById("org");
   const projEl = document.getElementById("project");
+  const svcEl = document.getElementById("servicesUrl");
   const errEl = document.getElementById("err");
   const btn = document.getElementById("save");
 
   orgEl.value = params.get("org") || "";
   projEl.value = params.get("project") || "";
+  svcEl.value = params.get("servicesUrl") || "";
+
+  // The web server isn't running during first-run setup, so serve the example
+  // as an inline data URI rather than fetching /services.example.json.
+  const EXAMPLE = {
+    "Business A": [
+      { name: "core-service", buildPipelineId: 132, releasePipelineId: 162 },
+      { name: "order-service", buildPipelineId: 143, releasePipelineId: 171 }
+    ],
+    "Business B": [
+      { name: "partner-portal", buildPipelineId: 192, releasePipelineId: 193 }
+    ]
+  };
+  document.getElementById("example-link").href =
+    "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify(EXAMPLE, null, 2));
 
   async function save() {
     const org = orgEl.value.trim();
     const project = projEl.value.trim();
+    const servicesUrl = svcEl.value.trim();
     if (!/^https?:\/\/.+/i.test(org)) { errEl.textContent = "Enter a valid org URL (https://…)"; orgEl.focus(); return; }
     if (!project) { errEl.textContent = "Enter a project name."; projEl.focus(); return; }
+    if (servicesUrl && !/^https?:\/\//i.test(servicesUrl)) { errEl.textContent = "Services JSON URL must start with http:// or https://"; svcEl.focus(); return; }
     errEl.textContent = "";
     btn.disabled = true;
-    await window.qwipoSetup.save(org, project); // main process saves, then closes this window
+    await window.qwipoSetup.save(org, project, servicesUrl); // main process saves, then closes this window
   }
 
   btn.addEventListener("click", save);
-  projEl.addEventListener("keydown", (e) => { if (e.key === "Enter") save(); });
+  svcEl.addEventListener("keydown", (e) => { if (e.key === "Enter") save(); });
+  projEl.addEventListener("keydown", (e) => { if (e.key === "Enter") svcEl.focus(); });
   orgEl.addEventListener("keydown", (e) => { if (e.key === "Enter") projEl.focus(); });
   orgEl.focus();
 </script>

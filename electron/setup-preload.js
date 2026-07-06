@@ -1,5 +1,5 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("qwipoSetup", {
-  save: (org, project) => ipcRenderer.invoke("setup:save", { org, project }),
+  save: (org, project, servicesUrl) => ipcRenderer.invoke("setup:save", { org, project, servicesUrl }),
 });

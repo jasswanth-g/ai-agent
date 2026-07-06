@@ -2,16 +2,19 @@
 /**
  * Lightweight web UI for Build & Release.
  *
- * Zero new dependencies — uses Node's built-in http module so it ships with the
- * existing CLI install. Serves a single-page UI (public/index.html) and a small
- * JSON/streaming API backed by the same Azure CLI helpers the agent tools use.
+ * Zero new dependencies — uses Node's built-in http module. Serves a single-page
+ * UI (public/index.html) and a small JSON/streaming API that shells out to the
+ * Azure CLI. This is the app's local backend; the Electron shell forks it.
  *
- * Run:  qwipo --web   (or)   node src/web/server.js   (or)   npm run web
+ * Run:  node src/web/server.js   (or)   npm run web   (or)   npm run app
  * Then open http://localhost:4317
  *
  * Endpoints:
  *   GET  /                     -> the UI
- *   GET  /api/services         -> [{ name, buildPipelineId, releasePipelineId }]
+ *   GET  /api/projects[?org=]  -> { projects: [{id,name}], org, activeOrg, activeProject, activeServicesUrl }
+ *   POST /api/project          -> { org, project, servicesUrl? } switches + persists the active workspace
+ *   GET  /api/services         -> { services: [{ name, buildPipelineId, releasePipelineId }], warnings, error }
+ *                                 from the hosted services.json (keyed by business name)
  *   GET  /api/branches?service -> { repository, branches: [...] }   (live from Azure)
  *   POST /api/deploy           -> NDJSON stream of progress events for each job:
  *                                 build -> wait -> (success) release -> wait
@@ -23,11 +26,22 @@ const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const { execAzCli } = require("../utils/shell");
-const { AZURE_DEVOPS_ORG, AZURE_DEVOPS_PROJECT } = require("../config");
-const { SERVICE_ALIASES } = require("../config/serviceAliases");
+const { AZURE_DEVOPS_ORG, AZURE_DEVOPS_PROJECT, AZURE_DEVOPS_SERVICES_URL } = require("../config");
+const { setConfig } = require("../setup");
 
 const PORT = Number(process.env.QWIPO_WEB_PORT) || 4317;
 const PUBLIC_DIR = path.join(__dirname, "public");
+
+// Active Azure DevOps org + project ("business"). Both start from config and can
+// be changed at runtime via the settings popup (POST /api/project), which also
+// persists them. Every `az` call below targets activeOrg / activeProject.
+let activeOrg = AZURE_DEVOPS_ORG;
+let activeProject = AZURE_DEVOPS_PROJECT;
+
+// Hosted services file (services.json) — the single source of truth for the
+// service list. A JSON object keyed by business name, each value an array of
+// { name, buildPipelineId, releasePipelineId }. Set/changed in Workspace settings.
+let activeServicesUrl = AZURE_DEVOPS_SERVICES_URL;
 
 // Local credential/reference vault — a plaintext JSON file on this machine,
 // gitignored. Stores tokens, test/dev creds, app mobile numbers, etc.
@@ -91,6 +105,59 @@ function httpsPostJson(targetUrl, obj) {
   });
 }
 
+/**
+ * GET a URL and resolve its parsed JSON. Follows redirects (raw-file hosts often
+ * 30x to a CDN) and classifies failures — network/offline vs HTTP status vs bad
+ * JSON — so the UI can show a meaningful message instead of a raw stack.
+ */
+function fetchJson(targetUrl, redirectsLeft = 5) {
+  return new Promise((resolve, reject) => {
+    let u;
+    try { u = new URL(targetUrl); }
+    catch { return reject(new Error("The services URL is not a valid URL.")); }
+
+    const lib = u.protocol === "http:" ? http : https;
+    const req = lib.get(
+      {
+        hostname: u.hostname,
+        port: u.port || (u.protocol === "http:" ? 80 : 443),
+        path: u.pathname + u.search,
+        headers: { accept: "application/json", "user-agent": "qwipo-devops" },
+        timeout: 15000,
+      },
+      (resp) => {
+        const { statusCode, headers } = resp;
+        // Follow redirects to the actual file (e.g. github.com → raw CDN).
+        if ([301, 302, 303, 307, 308].includes(statusCode) && headers.location && redirectsLeft > 0) {
+          resp.resume();
+          const next = new URL(headers.location, u).toString();
+          return fetchJson(next, redirectsLeft - 1).then(resolve, reject);
+        }
+        if (statusCode < 200 || statusCode >= 300) {
+          resp.resume();
+          return reject(new Error(`The services URL returned HTTP ${statusCode}.`));
+        }
+        let body = "";
+        resp.on("data", (c) => {
+          body += c;
+          if (body.length > 5e6) req.destroy(new Error("The services file is too large (>5MB)."));
+        });
+        resp.on("end", () => {
+          try { resolve(JSON.parse(body)); }
+          catch { reject(new Error("The services URL did not return valid JSON.")); }
+        });
+      }
+    );
+    req.on("timeout", () => req.destroy(new Error("Timed out reaching the services URL.")));
+    req.on("error", (err) => {
+      const offline = ["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ETIMEDOUT", "ENETUNREACH", "ENETDOWN"].includes(err.code);
+      reject(new Error(offline
+        ? "Couldn't reach the services URL — check your internet connection."
+        : `Couldn't fetch the services URL: ${err.message}`));
+    });
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Azure helpers
 // ---------------------------------------------------------------------------
@@ -100,8 +167,8 @@ async function getPipelineRepository(buildPipelineId) {
   const output = await execAzCli([
     "pipelines", "show",
     "--id", String(buildPipelineId),
-    "--org", AZURE_DEVOPS_ORG,
-    "--project", AZURE_DEVOPS_PROJECT,
+    "--org", activeOrg,
+    "--project", activeProject,
     "--output", "json",
   ]);
   const def = JSON.parse(output);
@@ -116,8 +183,8 @@ async function listBranches(repository) {
     "repos", "ref", "list",
     "--repository", String(repository),
     "--filter", "heads/",
-    "--org", AZURE_DEVOPS_ORG,
-    "--project", AZURE_DEVOPS_PROJECT,
+    "--org", activeOrg,
+    "--project", activeProject,
     "--output", "json",
   ]);
   const refs = JSON.parse(output);
@@ -128,8 +195,8 @@ async function getBuild(buildId) {
   const output = await execAzCli([
     "pipelines", "build", "show",
     "--id", String(buildId),
-    "--org", AZURE_DEVOPS_ORG,
-    "--project", AZURE_DEVOPS_PROJECT,
+    "--org", activeOrg,
+    "--project", activeProject,
     "--output", "json",
   ]);
   return JSON.parse(output);
@@ -141,8 +208,8 @@ async function queuePipeline(definitionId, branch) {
     "pipelines", "build", "queue",
     "--definition-id", String(definitionId),
     "--branch", branchRef,
-    "--org", AZURE_DEVOPS_ORG,
-    "--project", AZURE_DEVOPS_PROJECT,
+    "--org", activeOrg,
+    "--project", activeProject,
     "--output", "json",
   ]);
   return JSON.parse(output);
@@ -162,11 +229,105 @@ async function queueRelease(definitionId, branch, environment) {
     "--id", String(definitionId),
     "--branch", branchRef,
     "--parameters", `environment=${environment}`,
-    "--org", AZURE_DEVOPS_ORG,
-    "--project", AZURE_DEVOPS_PROJECT,
+    "--org", activeOrg,
+    "--project", activeProject,
     "--output", "json",
   ]);
   return JSON.parse(output);
+}
+
+/** List the projects ("businesses") in an org (defaults to the active org). */
+async function listProjects(org = activeOrg) {
+  const output = await execAzCli([
+    "devops", "project", "list",
+    "--org", org,
+    "--output", "json",
+  ]);
+  const parsed = JSON.parse(output);
+  const items = Array.isArray(parsed) ? parsed : (parsed.value || []);
+  return items
+    .map((p) => ({ id: p.id, name: p.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Services are cached per (org, project, servicesUrl). Invalidated on any switch.
+// A successful result is cached for SERVICES_TTL_MS; a failed one is not cached
+// (at: 0) so the next call — or a manual refresh — retries immediately.
+let servicesCache = { org: null, project: null, url: null, at: 0, services: [], warnings: [], error: null };
+const SERVICES_TTL_MS = 60000;
+
+/**
+ * Pull the service list for the active project from a hosted services.json.
+ * Shape: { "<business>": [ { name, buildPipelineId, releasePipelineId }, ... ] }.
+ * Returns { services, warnings, error } — `error` set (services empty) on any
+ * hard failure (offline, HTTP error, bad JSON, business not in the file).
+ */
+async function servicesFromUrl(url) {
+  const warnings = [];
+  let data;
+  try {
+    data = await fetchJson(url);
+  } catch (err) {
+    return { services: [], warnings, error: err.message };
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { services: [], warnings, error: "The services file must be a JSON object keyed by business name." };
+  }
+  const list = data[activeProject];
+  if (list === undefined) {
+    const known = Object.keys(data);
+    const hint = known.length ? ` Available: ${known.join(", ")}.` : "";
+    return { services: [], warnings, error: `No services listed for business "${activeProject}" in the services file.${hint}` };
+  }
+  if (!Array.isArray(list)) {
+    return { services: [], warnings, error: `The entry for "${activeProject}" in the services file must be an array.` };
+  }
+  const services = list
+    .filter((s) => s && s.name && s.buildPipelineId && s.releasePipelineId)
+    .map((s) => ({ name: String(s.name), buildPipelineId: s.buildPipelineId, releasePipelineId: s.releasePipelineId }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const skipped = list.length - services.length;
+  if (skipped > 0) {
+    warnings.push(`${skipped} entr${skipped === 1 ? "y was" : "ies were"} skipped in the services file (missing name/buildPipelineId/releasePipelineId).`);
+  }
+  return { services, warnings, error: null };
+}
+
+/**
+ * Resolve the service list for the active project from the hosted services.json.
+ * The URL is the single source of truth — no URL means no services. Cached per
+ * (org, project, url); force=true refetches.
+ */
+async function getServices(force = false) {
+  const now = Date.now();
+  if (!force && servicesCache.org === activeOrg && servicesCache.project === activeProject
+      && servicesCache.url === activeServicesUrl && servicesCache.at
+      && now - servicesCache.at < SERVICES_TTL_MS) {
+    return servicesCache;
+  }
+
+  const { services, warnings, error } = activeServicesUrl
+    ? await servicesFromUrl(activeServicesUrl)
+    : { services: [], warnings: [], error: "No services URL configured — add one in Workspace settings." };
+
+  servicesCache = {
+    org: activeOrg,
+    project: activeProject,
+    url: activeServicesUrl,
+    at: error ? 0 : now, // don't cache failures — retry on the next call
+    services,
+    warnings,
+    error,
+  };
+  return servicesCache;
+}
+
+/** Resolve a service name to its `{ buildPipelineId, releasePipelineId }`, or null. */
+async function resolveServiceIds(name) {
+  const { services } = await getServices();
+  const hit = services.find((s) => s.name === name);
+  if (hit) return { buildPipelineId: hit.buildPipelineId, releasePipelineId: hit.releasePipelineId };
+  return null;
 }
 
 /**
@@ -203,7 +364,7 @@ async function runJob(job, emit, isAborted = () => false) {
   const branch = String(job.branch || "").trim();
   const environment = (job.environment || "dev").toLowerCase();
   const action = (job.action || "build-release").toLowerCase();
-  const ids = SERVICE_ALIASES[service];
+  const ids = await resolveServiceIds(service);
 
   const send = (phase, status, extra = {}) =>
     emit({ service, phase, status, ...extra });
@@ -332,7 +493,7 @@ function serveStatic(res, file) {
     if (err) return sendJson(res, 404, { error: "not found" });
     const ext = path.extname(full);
     const type = ext === ".html" ? "text/html" : ext === ".js" ? "text/javascript" : ext === ".css" ? "text/css"
-      : ext === ".mp3" ? "audio/mpeg" : "application/octet-stream";
+      : ext === ".json" ? "application/json" : ext === ".mp3" ? "audio/mpeg" : "application/octet-stream";
     res.writeHead(200, { "Content-Type": type });
     res.end(buf);
   });
@@ -425,20 +586,72 @@ const server = http.createServer(async (req, res) => {
       return serveStatic(res, pathname.replace(/^\/+/, ""));
     }
 
-    // --- list services from config ---
+    // --- list projects ("businesses") for an org (defaults to the active org) ---
+    // The settings popup passes ?org=<typed url> to preview a different org before saving.
+    if (req.method === "GET" && pathname === "/api/projects") {
+      const org = (url.searchParams.get("org") || "").trim() || activeOrg;
+      try {
+        const projects = await listProjects(org);
+        return sendJson(res, 200, { projects, org, activeOrg, activeProject, activeServicesUrl });
+      } catch (err) {
+        return sendJson(res, 200, { projects: [], org, activeOrg, activeProject, activeServicesUrl, error: err.message });
+      }
+    }
+
+    // --- switch the active org + project; persist both ---
+    if (req.method === "POST" && pathname === "/api/project") {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      const org = String(body.org || "").trim() || activeOrg;
+      const project = String(body.project || "").trim();
+      // servicesUrl is optional; omit the field to keep the current one, or send
+      // "" to clear it (back to folder discovery). Must be http(s) when present.
+      const servicesUrl = body.servicesUrl !== undefined ? String(body.servicesUrl).trim() : activeServicesUrl;
+      if (!org) return sendJson(res, 400, { error: "org is required" });
+      if (!project) return sendJson(res, 400, { error: "project is required" });
+      if (servicesUrl && !/^https?:\/\//i.test(servicesUrl)) {
+        return sendJson(res, 400, { error: "Services JSON URL must start with http:// or https://" });
+      }
+      if (currentRun && currentRun.status === "running") {
+        return sendJson(res, 409, { error: "A run is in progress — stop it before switching workspace." });
+      }
+      // Validate the project exists in the (possibly new) org.
+      try {
+        const projects = await listProjects(org);
+        if (projects.length && !projects.some((p) => p.name === project)) {
+          return sendJson(res, 400, { error: `Business "${project}" not found in this org.` });
+        }
+      } catch (err) {
+        return sendJson(res, 400, { error: `Could not reach org "${org}": ${err.message}` });
+      }
+      activeOrg = org;
+      activeProject = project;
+      activeServicesUrl = servicesUrl;
+      servicesCache = { org: null, project: null, url: null, at: 0, services: [], warnings: [], error: null }; // invalidate
+      try {
+        setConfig("AZURE_DEVOPS_ORG", org);
+        setConfig("AZURE_DEVOPS_PROJECT", project);
+        setConfig("SERVICES_URL", servicesUrl);
+      } catch { /* persistence is best-effort */ }
+      return sendJson(res, 200, { ok: true, activeOrg, activeProject, activeServicesUrl });
+    }
+
+    // --- list services for the active project (from the hosted services.json) ---
     if (req.method === "GET" && pathname === "/api/services") {
-      const services = Object.entries(SERVICE_ALIASES).map(([name, ids]) => ({
-        name,
-        buildPipelineId: ids.buildPipelineId,
-        releasePipelineId: ids.releasePipelineId,
-      }));
-      return sendJson(res, 200, { services, defaultBranches: DEFAULT_BRANCHES });
+      const force = url.searchParams.get("refresh") === "1";
+      const { services, warnings, error } = await getServices(force);
+      return sendJson(res, 200, {
+        services,
+        defaultBranches: DEFAULT_BRANCHES,
+        project: activeProject,
+        warnings,
+        error,
+      });
     }
 
     // --- live branch list for a service ---
     if (req.method === "GET" && pathname === "/api/branches") {
       const service = url.searchParams.get("service");
-      const ids = SERVICE_ALIASES[service];
+      const ids = await resolveServiceIds(service);
       if (!ids) return sendJson(res, 404, { error: `Unknown service "${service}".` });
       try {
         const repo = await getPipelineRepository(ids.buildPipelineId);
@@ -519,7 +732,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  const orgInfo = AZURE_DEVOPS_ORG ? "" : "  (warning: Azure DevOps org/project not configured — run `qwipo --setup`)";
+  const orgInfo = activeOrg ? "" : "  (warning: Azure DevOps org/project not configured — set it in Workspace settings)";
   console.log(`\n  Build & Release UI running at  http://localhost:${PORT}${orgInfo}\n`);
 });
 
