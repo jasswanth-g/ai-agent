@@ -124,7 +124,7 @@ function fetchJson(targetUrl, redirectsLeft = 5) {
         hostname: u.hostname,
         port: u.port || (u.protocol === "http:" ? 80 : 443),
         path: u.pathname + u.search,
-        headers: { accept: "application/json", "user-agent": "qwipo-devops" },
+        headers: { accept: "application/json", "user-agent": "deploymate" },
         timeout: 15000,
       },
       (resp) => {
@@ -540,7 +540,8 @@ function serveStatic(res, file) {
     if (err) return sendJson(res, 404, { error: "not found" });
     const ext = path.extname(full);
     const type = ext === ".html" ? "text/html" : ext === ".js" ? "text/javascript" : ext === ".css" ? "text/css"
-      : ext === ".json" ? "application/json" : ext === ".mp3" ? "audio/mpeg" : "application/octet-stream";
+      : ext === ".json" ? "application/json" : ext === ".mp3" ? "audio/mpeg"
+      : ext === ".png" ? "image/png" : ext === ".ico" ? "image/x-icon" : "application/octet-stream";
     res.writeHead(200, { "Content-Type": type });
     res.end(buf);
   });

@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Qwipo · Build &amp; Release</title>
+<title>DeployMate · Build &amp; Release</title>
+<link rel="icon" type="image/png" href="/favicon.png" />
 <style>
   :root {
     --bg: #0f1115; --panel: #171a21; --panel-2: #1d212b; --border: #2a2f3a;
@@ -21,6 +22,9 @@
   }
   header h1 { font-size: 16px; margin: 0; font-weight: 600; }
   header .sub { color: var(--muted); font-size: 12px; }
+  .brand { display: flex; align-items: center; gap: 8px; padding-right: 12px; margin-right: 4px; border-right: 1px solid var(--border); }
+  .brand img { width: 26px; height: 26px; display: block; }
+  .brand .brand-name { font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
   /* Business name — looks like a heading, opens the workspace popup on click */
   .biz-trigger {
     display: flex; align-items: center; gap: 6px;
@@ -280,6 +284,10 @@
 </head>
 <body>
 <header>
+  <span class="brand">
+    <img src="/logo.png" alt="DeployMate" />
+    <span class="brand-name">DeployMate</span>
+  </span>
   <button type="button" class="biz-trigger" id="biz-trigger" aria-haspopup="dialog" title="Workspace settings">
     <span class="biz-name" id="biz-name">…</span>
     <svg class="biz-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>

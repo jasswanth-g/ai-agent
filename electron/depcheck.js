@@ -38,8 +38,8 @@ async function ensureDependencies() {
       type: "error",
       message: "Azure CLI is required",
       detail:
-        "Qwipo DevOps uses the Azure CLI (az) to talk to Azure DevOps, but it isn't " +
-        "installed (or isn't on the PATH).\n\nInstall it, then reopen Qwipo DevOps.",
+        "DeployMate uses the Azure CLI (az) to talk to Azure DevOps, but it isn't " +
+        "installed (or isn't on the PATH).\n\nInstall it, then reopen DeployMate.",
       buttons: ["Open Install Guide", "Quit"],
       defaultId: 0,
       cancelId: 1,
@@ -57,7 +57,7 @@ async function ensureDependencies() {
         message: "Couldn't set up the Azure DevOps extension",
         detail:
           "The app needs the 'azure-devops' CLI extension (for az pipelines / az repos), " +
-          "and the automatic install failed.\n\nRun this in Terminal, then reopen Qwipo DevOps:\n\n" +
+          "and the automatic install failed.\n\nRun this in Terminal, then reopen DeployMate:\n\n" +
           "    az extension add --name azure-devops",
         buttons: ["Open Install Guide", "Quit"],
         defaultId: 1,

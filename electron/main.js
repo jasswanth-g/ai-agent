@@ -1,5 +1,5 @@
 /**
- * Electron shell for the Qwipo DevOps web UI.
+ * Electron shell for the DeployMate web UI.
  *
  * This does NOT reimplement anything — it boots the existing web server
  * (src/web/server.js) as a child process and shows it in a native window.
@@ -89,7 +89,7 @@ function createWindow() {
     height: 880,
     minWidth: 900,
     minHeight: 600,
-    title: "Qwipo DevOps",
+    title: "DeployMate",
     backgroundColor: "#0b0f17",
     webPreferences: { contextIsolation: true },
   });
@@ -115,7 +115,7 @@ function runSetupWindow(defaults) {
       width: 520,
       height: 560,
       resizable: false,
-      title: "Qwipo DevOps — Setup",
+      title: "DeployMate — Setup",
       backgroundColor: "#0b0f17",
       webPreferences: {
         contextIsolation: true,
@@ -210,7 +210,7 @@ app.whenReady().then(async () => {
       type: "info",
       message: "Sign in to Azure",
       detail:
-        "Qwipo DevOps uses your Azure sign-in to talk to Azure DevOps. " +
+        "DeployMate uses your Azure sign-in to talk to Azure DevOps. " +
         "Signing in opens your browser.",
       buttons: ["Sign In", "Continue Anyway", "Quit"],
       defaultId: 0,
@@ -239,7 +239,7 @@ app.whenReady().then(async () => {
     await waitForServer();
   } catch (err) {
     dialog.showErrorBox(
-      "Qwipo DevOps — startup failed",
+      "DeployMate — startup failed",
       `The web server didn't start.\n\n${err.message}\n\nCheck that nothing else is using port ${PORT}.`
     );
     app.quit();

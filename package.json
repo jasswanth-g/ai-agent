@@ -1,8 +1,8 @@
 {
-  "name": "@qwipo/aiagent",
+  "name": "deploymate",
   "version": "1.0.0",
-  "description": "Azure DevOps Build & Release web app for Qwipo",
-  "author": "Qwipo",
+  "description": "DeployMate — Azure DevOps Build & Release desktop app",
+  "author": "DeployMate",
   "main": "electron/main.js",
   "scripts": {
     "web": "node src/web/server.js",
@@ -22,8 +22,8 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.qwipo.devops",
-    "productName": "Qwipo DevOps",
+    "appId": "com.deploymate.app",
+    "productName": "DeployMate",
     "files": [
       "electron/**/*",
       "src/**/*",
@@ -31,6 +31,7 @@
       "package.json"
     ],
     "mac": {
+      "icon": "build/icon.icns",
       "target": [
         {
           "target": "dmg",

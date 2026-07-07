@@ -21,7 +21,7 @@ function fetchLatestRelease() {
         path: `/repos/${OWNER}/${REPO}/releases/latest`,
         method: "GET",
         headers: {
-          "User-Agent": "Qwipo-DevOps-Updater",
+          "User-Agent": "DeployMate-Updater",
           Accept: "application/vnd.github+json",
         },
         timeout: 10000,
@@ -94,7 +94,7 @@ async function checkForUpdates({ silent = true } = {}) {
   if (latest && isNewer(latest, current)) {
     const { response } = await dialog.showMessageBox({
       type: "info",
-      message: "A new version of Qwipo DevOps is available",
+      message: "A new version of DeployMate is available",
       detail: `You have ${current}. ${latest.replace(/^v/i, "")} is available.\n\n${
         rel.name || ""
       }\n\nDownload it, then drag the new app into Applications (replacing the old one).`,
@@ -107,7 +107,7 @@ async function checkForUpdates({ silent = true } = {}) {
     dialog.showMessageBox({
       type: "info",
       message: "You're up to date",
-      detail: `Qwipo DevOps ${current} is the latest version.`,
+      detail: `DeployMate ${current} is the latest version.`,
       buttons: ["OK"],
     });
   }
