@@ -175,6 +175,9 @@
   .dot.succeeded { background: var(--ok); }
   .dot.failed, .dot.error { background: var(--err); }
   .dot.skipped { background: var(--muted); }
+  .dot.stopped { background: var(--warn); }
+  .dot.not-triggered { background: var(--muted); }
+  .step.not-triggered .meta { color: var(--muted); font-style: italic; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
   .step .label { text-transform: capitalize; }
   .step .meta { color: var(--muted); font-size: 12px; }
@@ -301,10 +304,10 @@
     <h3 id="settings-title">Workspace</h3>
     <label class="modal-label" for="settings-org">Azure DevOps Org URL</label>
     <input id="settings-org" class="modal-input" type="text" placeholder="https://dev.azure.com/your-org/" autocomplete="off" spellcheck="false" />
-    <label class="modal-label" for="settings-services-url">Services JSON URL</label>
-    <input id="settings-services-url" class="modal-input" type="text" placeholder="https://…/services.json" autocomplete="off" spellcheck="false" />
+    <label class="modal-label" for="settings-services-url">Services JSON — URL or file path</label>
+    <input id="settings-services-url" class="modal-input" type="text" placeholder="https://…/services.json  or  /path/to/services.json" autocomplete="off" spellcheck="false" />
     <div class="modal-hint">
-      A JSON object keyed by business name → its services. This is where the service list comes from — without it, no services are listed.
+      A JSON object keyed by business name → its services. Point it at a hosted URL or a local file. Without it, no services are listed.
       <a href="/services.example.json" download="services.example.json">Download example</a>
     </div>
     <label class="modal-label" for="settings-business">Business</label>
@@ -351,6 +354,7 @@
       <select id="release-env" style="min-width:120px;">
         <option value="dev" selected>dev</option>
         <option value="testing">testing</option>
+        <option value="staging">staging</option>
         <option value="production">production</option>
       </select>
       <button id="clear" class="btn ghost" style="margin-left:auto;">Clear all</button>
@@ -633,7 +637,7 @@ async function saveSettings() {
   errEl.textContent = "";
   if (!/^https?:\/\/.+/i.test(org)) { errEl.textContent = "Enter a valid org URL (https://…)."; return; }
   if (!project) { errEl.textContent = "Pick a business."; return; }
-  if (servicesUrl && !/^https?:\/\//i.test(servicesUrl)) { errEl.textContent = "Services JSON URL must start with http:// or https://"; return; }
+  if (servicesUrl && !/^(https?:\/\/|file:\/\/|\/|[A-Za-z]:[\\/]|\\\\)/i.test(servicesUrl)) { errEl.textContent = "Enter an http(s) URL or an absolute path to a .json file."; return; }
 
   const btn = $("#settings-save");
   btn.disabled = true;
@@ -785,7 +789,7 @@ function populateGlobalBranch() {
 }
 
 // ---- per-service override row (build branch + release env) ----
-const ENV_OPTIONS = ["dev", "testing", "production"];
+const ENV_OPTIONS = ["dev", "testing", "staging", "production"];
 
 function buildOverrideRow(name, job) {
   // Build-branch override — searchable; "(global)" first, then this service's branches (lazy).
@@ -893,9 +897,12 @@ function renderProgress(container, job) {
     if (p.releaseId) meta.push(`release #${p.releaseId}`);
     if (p.elapsed != null) meta.push(`${p.elapsed}s`);
     if (p.result) meta.push(p.result);
-    const step = el("div", { class: "step" },
+    // "Not triggered" is service-level, not about the build/release step — drop
+    // the phase label so it reads as a standalone status line.
+    const notTriggered = p.status === "not-triggered";
+    const step = el("div", { class: "step" + (notTriggered ? " not-triggered" : "") },
       el("span", { class: "dot " + p.status }),
-      el("span", { class: "label" }, phase + ":"),
+      el("span", { class: "label" }, notTriggered ? "" : phase + ":"),
       el("span", { class: "meta" }, p.message || p.status),
     );
     if (meta.length) step.append(el("span", { class: "meta" }, "· " + meta.join(" · ")));
@@ -1001,10 +1008,14 @@ async function pollRun() {
     } else {
       state.running = false;
       if (run && run.result) {
-        const verb = run.status === "stopped" ? "Stopped" : "Done";
-        toast(`${verb} — ${run.result.succeeded} succeeded, ${run.result.failed} failed.`);
-        // success chime only when everything passed; failures already played faaah.mp3 as they happened
-        if (run.status !== "stopped" && run.result.failed === 0) playChime(true);
+        const r = run.result;
+        const parts = [`${r.succeeded} succeeded`, `${r.failed} failed`];
+        if (r.notTriggered) parts.push(`${r.notTriggered} not triggered`);
+        // "Halted" = a build failure cut the batch short (not a user Stop).
+        const verb = run.status === "stopped" ? "Stopped" : (r.notTriggered ? "Halted" : "Done");
+        toast(`${verb} — ${parts.join(", ")}.`);
+        // success chime only when everything passed (nothing failed or skipped)
+        if (run.status !== "stopped" && r.failed === 0 && !r.notTriggered) playChime(true);
       }
       setRunningUI();
     }

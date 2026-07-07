@@ -25,6 +25,7 @@ const http = require("http");
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
+const { fileURLToPath } = require("url");
 const { execAzCli } = require("../utils/shell");
 const { AZURE_DEVOPS_ORG, AZURE_DEVOPS_PROJECT, AZURE_DEVOPS_SERVICES_URL } = require("../config");
 const { setConfig } = require("../setup");
@@ -38,9 +39,10 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 let activeOrg = AZURE_DEVOPS_ORG;
 let activeProject = AZURE_DEVOPS_PROJECT;
 
-// Hosted services file (services.json) — the single source of truth for the
-// service list. A JSON object keyed by business name, each value an array of
-// { name, buildPipelineId, releasePipelineId }. Set/changed in Workspace settings.
+// Services file (services.json) — the single source of truth for the service
+// list. An http(s) URL, a file:// URL, or a local absolute path. A JSON object
+// keyed by business name, each value an array of { name, buildPipelineId,
+// releasePipelineId }. Set/changed in Workspace settings or first-run setup.
 let activeServicesUrl = AZURE_DEVOPS_SERVICES_URL;
 
 // Local credential/reference vault — a plaintext JSON file on this machine,
@@ -158,6 +160,37 @@ function fetchJson(targetUrl, redirectsLeft = 5) {
   });
 }
 
+// A services location may be an http(s) URL, a file:// URL, or a local absolute
+// path (unix `/…`, Windows `C:\…` / `C:/…`, or a UNC `\\…`).
+function isValidServicesLocation(loc) {
+  return /^(https?:\/\/|file:\/\/|\/|[A-Za-z]:[\\/]|\\\\)/i.test(String(loc || "").trim());
+}
+
+/** Read + parse the services document from a local file path (or file:// URL). */
+async function readJsonFile(location) {
+  let filePath = location;
+  if (/^file:\/\//i.test(location)) {
+    try { filePath = fileURLToPath(location); }
+    catch { throw new Error("The services file path is not a valid file:// URL."); }
+  }
+  let raw;
+  try {
+    raw = await fs.promises.readFile(filePath, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") throw new Error(`No services file found at ${filePath}.`);
+    if (err.code === "EACCES") throw new Error(`No permission to read the services file at ${filePath}.`);
+    if (err.code === "EISDIR") throw new Error(`${filePath} is a folder, not a services file.`);
+    throw new Error(`Couldn't read the services file: ${err.message}`);
+  }
+  try { return JSON.parse(raw); }
+  catch { throw new Error("The services file does not contain valid JSON."); }
+}
+
+/** Load the services document from wherever it lives — web URL or local file. */
+function loadServicesDoc(location) {
+  return /^https?:\/\//i.test(location) ? fetchJson(location) : readJsonFile(location);
+}
+
 // ---------------------------------------------------------------------------
 // Azure helpers
 // ---------------------------------------------------------------------------
@@ -220,7 +253,8 @@ async function queuePipeline(definitionId, branch) {
  * `environment` TEMPLATE PARAMETER, not the branch — passing only a branch makes
  * the pipeline fall back to its default (dev). We use `az pipelines run` because
  * `az pipelines build queue` cannot pass template parameters. The branch is still
- * the source code: dev branch for dev, testing for testing, main for production.
+ * the source code: dev branch for dev, testing/staging from the selected branch,
+ * main for production.
  */
 async function queueRelease(definitionId, branch, environment) {
   const branchRef = branch.startsWith("refs/heads/") ? branch : `refs/heads/${branch}`;
@@ -257,16 +291,17 @@ let servicesCache = { org: null, project: null, url: null, at: 0, services: [], 
 const SERVICES_TTL_MS = 60000;
 
 /**
- * Pull the service list for the active project from a hosted services.json.
- * Shape: { "<business>": [ { name, buildPipelineId, releasePipelineId }, ... ] }.
- * Returns { services, warnings, error } — `error` set (services empty) on any
- * hard failure (offline, HTTP error, bad JSON, business not in the file).
+ * Pull the service list for the active project from the services.json — a hosted
+ * URL or a local file. Shape: { "<business>": [ { name, buildPipelineId,
+ * releasePipelineId }, ... ] }. Returns { services, warnings, error } — `error`
+ * set (services empty) on any hard failure (offline, HTTP/read error, bad JSON,
+ * business not in the file).
  */
-async function servicesFromUrl(url) {
+async function servicesFromUrl(location) {
   const warnings = [];
   let data;
   try {
-    data = await fetchJson(url);
+    data = await loadServicesDoc(location);
   } catch (err) {
     return { services: [], warnings, error: err.message };
   }
@@ -381,9 +416,9 @@ async function runJob(job, emit, isAborted = () => false) {
   // The release runs from the SAME branch the user selected (so a build from
   // `june2` releases from `june2`), passing `environment` as the deploy target.
   // Production is the one exception: it stays pinned to `main` for safety.
-  const ALLOWED_ENVS = ["dev", "testing", "production"];
+  const ALLOWED_ENVS = ["dev", "testing", "staging", "production"];
   if (doRelease && !ALLOWED_ENVS.includes(environment)) {
-    send(firstPhase, "error", { message: `Environment "${environment}" not allowed (dev, testing, or production).` });
+    send(firstPhase, "error", { message: `Environment "${environment}" not allowed (dev, testing, staging, or production).` });
     return { service, ok: false };
   }
   const releaseBranch = environment === "production" ? "main" : (branch || "dev");
@@ -412,7 +447,12 @@ async function runJob(job, emit, isAborted = () => false) {
       isAborted
     );
 
-    if (isAborted()) return { service, ok: false, aborted: true };
+    if (isAborted()) {
+      // Stopped mid-build: the build keeps running in Azure, we just stop watching.
+      send("build", "stopped", { buildId: build.id, message: "Stopped — build still running in Azure." });
+      if (doRelease) send("release", "not-triggered", { message: "Not triggered — run stopped." });
+      return { service, ok: false, aborted: true };
+    }
     if (!finalBuild) {
       send("build", "error", { buildId: build.id, message: "Build polling stopped." + (doRelease ? " Release skipped." : "") });
       return { service, ok: false };
@@ -427,7 +467,10 @@ async function runJob(job, emit, isAborted = () => false) {
 
   // ---- RELEASE ---- (when building too, only reached after a successful build)
   if (doRelease) {
-    if (isAborted()) return { service, ok: false, aborted: true }; // disconnected before release
+    if (isAborted()) { // stopped after the build, before the release was triggered
+      send("release", "not-triggered", { message: "Not triggered — run stopped." });
+      return { service, ok: false, aborted: true };
+    }
     if (releaseBranch.toLowerCase() === "master") {
       send("release", "error", { message: "Releasing from master is not allowed." });
       return { service, ok: false };
@@ -436,7 +479,7 @@ async function runJob(job, emit, isAborted = () => false) {
     let release;
     try {
       // environment is passed as a template parameter — this is what actually
-      // selects dev/testing/production (the branch alone defaults to dev).
+      // selects dev/testing/staging/production (the branch alone defaults to dev).
       release = await queueRelease(ids.releasePipelineId, releaseBranch, environment);
     } catch (err) {
       send("release", "error", { message: `Release trigger failed: ${err.message}` });
@@ -449,7 +492,11 @@ async function runJob(job, emit, isAborted = () => false) {
       isAborted
     );
 
-    if (isAborted()) return { service, ok: false, aborted: true };
+    if (isAborted()) {
+      // Stopped mid-release: the release keeps running in Azure, we just stop watching.
+      send("release", "stopped", { releaseId: release.id, message: "Stopped — release still running in Azure." });
+      return { service, ok: false, aborted: true };
+    }
     if (!finalRelease) {
       send("release", "error", { releaseId: release.id, message: "Release polling stopped." });
       return { service, ok: false };
@@ -524,7 +571,7 @@ function startRun(jobs, opts = {}) {
     parallel,                   // whether services fire all-at-once
     progress: {},               // { service: { build:{...}, release:{...} } }
     status: "running",          // running | done | stopped
-    result: null,               // { succeeded, failed }
+    result: null,               // { succeeded, failed, notTriggered }
     aborted: false,
   };
   currentRun = run;
@@ -546,21 +593,45 @@ function startRun(jobs, opts = {}) {
     return runJob(job, emit, isAborted);
   };
 
+  // Mark a service that will never fire, so the UI shows "Not triggered" instead
+  // of a blank card. Emitted on the phase the job would have started with.
+  const markNotTriggered = (job, reason) => {
+    const action = (job.action || "build-release").toLowerCase();
+    const phase = action === "release" ? "release" : "build";
+    emit({ service: job.service, phase, status: "not-triggered", message: `Not triggered — ${reason}.` });
+  };
+
   // Fire-and-forget: the run continues regardless of who is (or isn't) watching.
   (async () => {
     let results;
     if (parallel) {
+      // Parallel is single-phase only (build-only / release-only): everything is
+      // launched at once, so there's no "not triggered" tail to halt.
       results = await Promise.all(jobs.map(runOne));
     } else {
+      // Sequential (Build+Release): run one at a time and halt the rest the moment
+      // a service is stopped or fails — the not-yet-started ones become "not triggered".
       results = [];
+      let haltReason = null;
       for (const job of jobs) {
-        if (isAborted()) break;
-        results.push(await runOne(job));
+        if (isAborted()) haltReason = haltReason || "run stopped";
+        if (haltReason) {
+          markNotTriggered(job, haltReason);
+          results.push({ service: job.service, ok: false, notTriggered: true });
+          continue;
+        }
+        const r = await runOne(job);
+        results.push(r);
+        if (r && r.aborted) haltReason = "run stopped";
+        else if (r && !r.ok) haltReason = "a prior build failed";
       }
     }
     run.result = {
       succeeded: results.filter((r) => r && r.ok).length,
-      failed: results.filter((r) => !r || !r.ok).length,
+      // The stopped-in-flight service (r.aborted) is neither succeeded, cleanly
+      // failed, nor "not triggered" — its own card shows "Stopped".
+      failed: results.filter((r) => r && !r.ok && !r.notTriggered && !r.aborted).length,
+      notTriggered: results.filter((r) => r && r.notTriggered).length,
     };
     run.status = run.aborted ? "stopped" : "done";
   })().catch((e) => {
@@ -604,12 +675,12 @@ const server = http.createServer(async (req, res) => {
       const org = String(body.org || "").trim() || activeOrg;
       const project = String(body.project || "").trim();
       // servicesUrl is optional; omit the field to keep the current one, or send
-      // "" to clear it (back to folder discovery). Must be http(s) when present.
+      // "" to clear it (no services). May be an http(s) URL or a local file path.
       const servicesUrl = body.servicesUrl !== undefined ? String(body.servicesUrl).trim() : activeServicesUrl;
       if (!org) return sendJson(res, 400, { error: "org is required" });
       if (!project) return sendJson(res, 400, { error: "project is required" });
-      if (servicesUrl && !/^https?:\/\//i.test(servicesUrl)) {
-        return sendJson(res, 400, { error: "Services JSON URL must start with http:// or https://" });
+      if (servicesUrl && !isValidServicesLocation(servicesUrl)) {
+        return sendJson(res, 400, { error: "Enter an http(s) URL or an absolute path to a .json file." });
       }
       if (currentRun && currentRun.status === "running") {
         return sendJson(res, 409, { error: "A run is in progress — stop it before switching workspace." });

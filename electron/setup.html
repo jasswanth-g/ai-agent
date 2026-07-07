@@ -43,10 +43,10 @@
     <label for="project">Project</label>
     <input id="project" type="text" placeholder="Your Project" />
 
-    <label for="servicesUrl">Services JSON URL</label>
-    <input id="servicesUrl" type="text" placeholder="https://…/services.json" />
+    <label for="servicesUrl">Services JSON — URL or file path</label>
+    <input id="servicesUrl" type="text" placeholder="https://…/services.json  or  /path/to/services.json" />
     <div class="hint">
-      A JSON object keyed by project name → its services. This is where the service list comes from — without it, no services are listed.
+      A JSON object keyed by project name → its services. Point it at a hosted URL or a local file. Without it, no services are listed.
       <a id="example-link" download="services.example.json">Download example</a>
     </div>
 
@@ -86,7 +86,7 @@
     const servicesUrl = svcEl.value.trim();
     if (!/^https?:\/\/.+/i.test(org)) { errEl.textContent = "Enter a valid org URL (https://…)"; orgEl.focus(); return; }
     if (!project) { errEl.textContent = "Enter a project name."; projEl.focus(); return; }
-    if (servicesUrl && !/^https?:\/\//i.test(servicesUrl)) { errEl.textContent = "Services JSON URL must start with http:// or https://"; svcEl.focus(); return; }
+    if (servicesUrl && !/^(https?:\/\/|file:\/\/|\/|[A-Za-z]:[\\/]|\\\\)/i.test(servicesUrl)) { errEl.textContent = "Enter an http(s) URL or an absolute path to a .json file."; svcEl.focus(); return; }
     errEl.textContent = "";
     btn.disabled = true;
     await window.qwipoSetup.save(org, project, servicesUrl); // main process saves, then closes this window
