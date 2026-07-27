@@ -224,6 +224,21 @@
       "name": "marketplace-connector-subscriber",
       "buildPipelineId": 228,
       "releasePipelineId": 234
+    },
+    {
+      "name": "logistics-connector-api",
+      "buildPipelineId": 236,
+      "releasePipelineId": 239
+    },
+    {
+      "name": "logistics-connector-scheduler",
+      "buildPipelineId": 237,
+      "releasePipelineId": 240
+    },
+    {
+      "name": "logistics-connector-subscriber",
+      "buildPipelineId": 238,
+      "releasePipelineId": 241
     }
   ]
 }
