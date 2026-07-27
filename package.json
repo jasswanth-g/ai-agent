@@ -7,7 +7,9 @@
   "scripts": {
     "web": "node src/web/server.js",
     "app": "electron electron/main.js",
-    "dist": "electron-builder --mac"
+    "dist": "electron-builder --mac",
+    "dist:unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
+    "dist:release": "electron-builder --mac -c.mac.notarize.teamId=$APPLE_TEAM_ID"
   },
   "keywords": [
     "azure-devops",
@@ -24,6 +26,7 @@
   "build": {
     "appId": "com.deploymate.app",
     "productName": "DeployMate",
+    "afterPack": "build/adhoc-sign.js",
     "files": [
       "electron/**/*",
       "src/**/*",
@@ -32,6 +35,10 @@
     ],
     "mac": {
       "icon": "build/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "target": [
         {
           "target": "dmg",
