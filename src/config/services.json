@@ -239,6 +239,21 @@
       "name": "logistics-connector-subscriber",
       "buildPipelineId": 238,
       "releasePipelineId": 241
+    },
+    {
+      "name": "hiring-admin",
+      "buildPipelineId": 245,
+      "releasePipelineId": 247
+    },
+    {
+      "name": "hiring-core-service-api",
+      "buildPipelineId": 244,
+      "releasePipelineId": 246
+    },
+    {
+      "name": "interview-voice-agent",
+      "buildPipelineId": 248,
+      "releasePipelineId": 249
     }
   ]
 }
